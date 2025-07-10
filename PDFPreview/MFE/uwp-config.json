@@ -1,0 +1,53 @@
+{
+  "uwp": {
+    "webAppUrl": "http://localhost:3000",
+    "testUrl": "http://localhost:3000/uwp-test",
+    "messageProtocol": {
+      "version": "1.0",
+      "format": "json-string",
+      "method": "PostWebMessageAsString"
+    },
+    "supportedMessages": {
+      "outgoing": [
+        {
+          "type": "loadPDF",
+          "description": "Load a PDF file by file path",
+          "required": ["filePath"]
+        },
+        {
+          "type": "clearPreview",
+          "description": "Clear the current PDF preview",
+          "required": []
+        }
+      ],
+      "incoming": [
+        {
+          "type": "ready",
+          "description": "Web app is ready for communication"
+        },
+        {
+          "type": "pdfLoaded",
+          "description": "PDF has been loaded successfully"
+        },
+        {
+          "type": "error",
+          "description": "An error occurred in the web app"
+        },
+        {
+          "type": "status",
+          "description": "Status update from the web app"
+        }
+      ]
+    },
+    "development": {
+      "autoStart": true,
+      "watchMode": true,
+      "debugConsole": true
+    },
+    "production": {
+      "minify": false,
+      "bundleAssets": false,
+      "port": 3000
+    }
+  }
+}

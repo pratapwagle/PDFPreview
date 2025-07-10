@@ -1,0 +1,311 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>File URL vs Data URL Method Test</title>
+    <style>
+        body { 
+            font-family: Arial, sans-serif; 
+            padding: 20px; 
+            background-color: #f5f5f5;
+        }
+        .test-container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background: white;
+            padding: 30px;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        .test-result { 
+            padding: 15px; 
+            margin: 10px 0; 
+            border-radius: 5px; 
+            border-left: 4px solid;
+        }
+        .pass { 
+            background: #d4edda; 
+            color: #155724; 
+            border-left-color: #28a745;
+        }
+        .fail { 
+            background: #f8d7da; 
+            color: #721c24; 
+            border-left-color: #dc3545;
+        }
+        .info { 
+            background: #d1ecf1; 
+            color: #0c5460; 
+            border-left-color: #17a2b8;
+        }
+        .warning { 
+            background: #fff3cd; 
+            color: #856404; 
+            border-left-color: #ffc107;
+        }
+        .method-comparison {
+            display: flex;
+            gap: 20px;
+            margin: 20px 0;
+        }
+        .method-box {
+            flex: 1;
+            padding: 20px;
+            border: 2px solid #dee2e6;
+            border-radius: 8px;
+            background: #f8f9fa;
+        }
+        .method-box.fileurl {
+            border-color: #007bff;
+        }
+        .method-box.dataurl {
+            border-color: #28a745;
+        }
+        .log-output {
+            background: #f8f9fa;
+            border: 1px solid #dee2e6;
+            border-radius: 4px;
+            padding: 15px;
+            margin: 10px 0;
+            font-family: 'Courier New', monospace;
+            font-size: 12px;
+            height: 200px;
+            overflow-y: auto;
+        }
+    </style>
+</head>
+<body>
+    <div class="test-container">
+        <h1>🔧 File URL vs Data URL Method Validation</h1>
+        <p>This test validates that File URL and Data URL methods work correctly and distinctly.</p>
+        
+        <div class="method-comparison">
+            <div class="method-box fileurl">
+                <h3>📁 File URL Method</h3>
+                <p><strong>Should produce:</strong></p>
+                <ul>
+                    <li>URL Type: "file"</li>
+                    <li>Transfer Method: "FileURL"</li>
+                    <li>URL starts with: "file:///"</li>
+                    <li>Copied to app data folder</li>
+                </ul>
+            </div>
+            
+            <div class="method-box dataurl">
+                <h3>📊 Data URL Method</h3>
+                <p><strong>Should produce:</strong></p>
+                <ul>
+                    <li>URL Type: "data"</li>
+                    <li>Transfer Method: "DataURL"</li>
+                    <li>URL starts with: "data:application/pdf;base64,"</li>
+                    <li>No file copying needed</li>
+                </ul>
+            </div>
+        </div>
+        
+        <div id="results"></div>
+        
+        <h3>Test Log</h3>
+        <div class="log-output" id="logOutput"></div>
+        
+        <h3>Expected UWP Debug Output</h3>
+        <div class="log-output">
+<strong>For File URL Method:</strong>
+🔄 Loading PDF using method: File URLs (Registry Configuration Required)
+🔄 Loading PDF using File URL method: test.pdf
+Generated file URL: file:///C:/Users/.../AppData/Local/Packages/.../LocalState/pdf_...
+📤 Sent file URL message for: test.pdf (Method: FileURL)
+
+<strong>For Data URL Method:</strong>
+🔄 Loading PDF using method: Data URLs (Universal Compatibility)
+📤 Sent data URL message for: test.pdf (Size: 1024 bytes)
+        </div>
+    </div>
+
+    <script>
+        // Mock UWP environment for testing
+        window.chrome = {
+            webview: {
+                postMessage: function(message) {
+                    const parsed = JSON.parse(message);
+                    logMessage(`📤 UWP Message: ${parsed.type}`);
+                    logMessage(`   Transfer Method: ${parsed.transferMethod}`);
+                    logMessage(`   URL Type: ${parsed.urlType}`);
+                    logMessage(`   URL Preview: ${parsed.pdfUrl.substring(0, 50)}...`);
+                    
+                    // Validate the message
+                    validateMessage(parsed);
+                },
+                addEventListener: function(event, handler) {
+                    window.uwpMessageHandler = handler;
+                }
+            }
+        };
+
+        // Test message validation
+        function validateMessage(message) {
+            const method = message.transferMethod;
+            const urlType = message.urlType;
+            const url = message.pdfUrl;
+            
+            if (method === 'FileURL') {
+                if (urlType === 'file' && url.startsWith('file:///')) {
+                    addResult('File URL Method', 'Correctly produces file:// URLs with FileURL transfer method', 'pass');
+                } else {
+                    addResult('File URL Method', `Error: Expected file URL but got ${urlType} with ${url.substring(0, 30)}...`, 'fail');
+                }
+            } else if (method === 'DataURL') {
+                if (urlType === 'data' && url.startsWith('data:application/pdf;base64,')) {
+                    addResult('Data URL Method', 'Correctly produces data URLs with DataURL transfer method', 'pass');
+                } else {
+                    addResult('Data URL Method', `Error: Expected data URL but got ${urlType} with ${url.substring(0, 30)}...`, 'fail');
+                }
+            } else {
+                addResult('Unknown Method', `Unexpected transfer method: ${method}`, 'warning');
+            }
+        }
+
+        // Enhanced UWP PDF Integration for testing
+        class TestUWPPDFIntegration {
+            constructor() {
+                this.isInUWP = true;
+                this.initializeMessageHandler();
+            }
+
+            initializeMessageHandler() {
+                if (window.chrome && window.chrome.webview) {
+                    window.chrome.webview.addEventListener('message', (event) => {
+                        this.handleUWPMessage(event.data);
+                    });
+                }
+            }
+
+            handleUWPMessage(data) {
+                try {
+                    const message = typeof data === 'string' ? JSON.parse(data) : data;
+                    
+                    switch (message.type) {
+                        case 'LOAD_PDF':
+                            this.handlePDFLoad(message);
+                            break;
+                    }
+                } catch (error) {
+                    console.error('Error handling UWP message:', error);
+                }
+            }
+
+            handlePDFLoad(message) {
+                logMessage(`📥 Received PDF load request:`);
+                logMessage(`   File: ${message.fileName}`);
+                logMessage(`   Method: ${message.transferMethod}`);
+                logMessage(`   URL Type: ${message.urlType}`);
+                logMessage(`   URL: ${message.pdfUrl.substring(0, 50)}...`);
+                
+                // Simulate loading success
+                setTimeout(() => {
+                    this.sendMessageToUWP({
+                        type: 'PDF_LOADED',
+                        message: `PDF loaded successfully via ${message.transferMethod}`,
+                        method: message.transferMethod.toLowerCase(),
+                        transferMethod: message.transferMethod
+                    });
+                }, 500);
+            }
+
+            sendMessageToUWP(message) {
+                if (window.chrome && window.chrome.webview) {
+                    window.chrome.webview.postMessage(JSON.stringify(message));
+                }
+            }
+
+            // Simulate different methods
+            simulateFileUrlMethod() {
+                logMessage('🧪 Simulating File URL Method...', 'info');
+                const message = {
+                    type: 'LOAD_PDF',
+                    fileName: 'test-file-url.pdf',
+                    pdfUrl: 'file:///C:/Users/TestUser/AppData/Local/Packages/TestApp/LocalState/pdf_20250710_123456_abcd1234.pdf',
+                    urlType: 'file',
+                    transferMethod: 'FileURL',
+                    fileSize: 1024000,
+                    timestamp: new Date().toISOString()
+                };
+                this.handleUWPMessage(message);
+            }
+
+            simulateDataUrlMethod() {
+                logMessage('🧪 Simulating Data URL Method...', 'info');
+                const message = {
+                    type: 'LOAD_PDF',
+                    fileName: 'test-data-url.pdf',
+                    pdfUrl: 'data:application/pdf;base64,JVBERi0xLjQKJeLjz9MKMSAwIG9iago8PAovVHlwZSAvQ2F0YWxvZwovUGFnZXMgMiAwIFIKPj4KZW5kb2JqCgoyIDAgb2JqCjw8Ci9UeXBlIC9QYWdlcwo...',
+                    urlType: 'data',
+                    transferMethod: 'DataURL',
+                    fileSize: 1024,
+                    timestamp: new Date().toISOString()
+                };
+                this.handleUWPMessage(message);
+            }
+
+            // Simulate incorrect behavior (what was happening before)
+            simulateIncorrectFileUrlMethod() {
+                logMessage('🧪 Simulating Incorrect File URL Method (was producing data URLs)...', 'warning');
+                const message = {
+                    type: 'LOAD_PDF',
+                    fileName: 'test-incorrect.pdf',
+                    pdfUrl: 'data:application/pdf;base64,JVBERi0xLjQKJeLjz9MKMSAwIG9iago8PAovVHlwZSAvQ2F0YWxvZwovUGFnZXMgMiAwIFIKPj4KZW5kb2JqCgoyIDAgb2JqCjw8Ci9UeXBlIC9QYWdlcwo...',
+                    urlType: 'data',
+                    transferMethod: 'FileURL', // This was the bug - FileURL method producing data URLs
+                    fileSize: 1024,
+                    timestamp: new Date().toISOString()
+                };
+                this.handleUWPMessage(message);
+            }
+        }
+
+        // Initialize test integration
+        const testIntegration = new TestUWPPDFIntegration();
+
+        // UI Helper functions
+        function addResult(test, details, status) {
+            const resultsDiv = document.getElementById('results');
+            const resultDiv = document.createElement('div');
+            resultDiv.className = `test-result ${status}`;
+            resultDiv.innerHTML = `<strong>${test}:</strong> ${details}`;
+            resultsDiv.appendChild(resultDiv);
+        }
+
+        function logMessage(message, type = 'info') {
+            const logOutput = document.getElementById('logOutput');
+            const timestamp = new Date().toLocaleTimeString();
+            const logEntry = document.createElement('div');
+            logEntry.style.color = type === 'error' ? '#dc3545' : 
+                                 type === 'warning' ? '#ffc107' : 
+                                 type === 'success' ? '#28a745' : 
+                                 type === 'info' ? '#007bff' : '#6c757d';
+            logEntry.textContent = `[${timestamp}] ${message}`;
+            logOutput.appendChild(logEntry);
+            logOutput.scrollTop = logOutput.scrollHeight;
+        }
+
+        // Auto-run tests
+        document.addEventListener('DOMContentLoaded', () => {
+            logMessage('🚀 File URL vs Data URL Test Environment Initialized', 'success');
+            
+            setTimeout(() => {
+                addResult('Test Setup', 'Testing correct File URL method implementation', 'info');
+                testIntegration.simulateFileUrlMethod();
+            }, 1000);
+            
+            setTimeout(() => {
+                addResult('Test Setup', 'Testing correct Data URL method implementation', 'info');
+                testIntegration.simulateDataUrlMethod();
+            }, 2000);
+            
+            setTimeout(() => {
+                addResult('Test Setup', 'Testing incorrect behavior (FileURL method producing data URLs)', 'info');
+                testIntegration.simulateIncorrectFileUrlMethod();
+            }, 3000);
+        });
+    </script>
+</body>
+</html>

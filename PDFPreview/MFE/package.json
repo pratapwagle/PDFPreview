@@ -1,0 +1,39 @@
+{
+  "name": "pdf-preview-app",
+  "version": "1.0.0",
+  "description": "Node.js TypeScript app for PDF preview",
+  "main": "dist/server.js",
+  "scripts": {
+    "build": "tsc",
+    "build:uwp": "tsc && echo Build completed for UWP integration",
+    "start": "node dist/server.js",
+    "start:uwp": "set NODE_ENV=production && node dist/server.js",
+    "dev": "ts-node-dev --respawn --transpile-only src/server.ts",
+    "dev:uwp": "set NODE_ENV=development && ts-node-dev --respawn --transpile-only src/server.ts",
+    "watch": "tsc --watch",
+    "test:uwp": "start http://localhost:3000/uwp-test && npm run dev",
+    "clean": "rmdir /S /Q dist 2>nul || echo Clean completed",
+    "rebuild": "npm run clean && npm run build",
+    "uwp-ready": "npm run build && echo UWP integration files are ready"
+  },
+  "dependencies": {
+    "express": "^4.18.2",
+    "cors": "^2.8.5",
+    "path": "^0.12.7"
+  },
+  "devDependencies": {
+    "@types/express": "^4.17.17",
+    "@types/node": "^20.4.5",
+    "@types/cors": "^2.8.13",
+    "typescript": "^5.1.6",
+    "ts-node-dev": "^2.0.0"
+  },
+  "keywords": [
+    "nodejs",
+    "typescript",
+    "pdf",
+    "preview"
+  ],
+  "author": "",
+  "license": "ISC"
+}

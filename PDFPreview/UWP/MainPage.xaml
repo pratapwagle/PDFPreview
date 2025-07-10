@@ -1,0 +1,38 @@
+<Page
+    x:Class="PDFPreviewUWP.MainPage"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:local="using:PDFPreviewUWP"
+    xmlns:controls="using:Microsoft.UI.Xaml.Controls"
+    Background="{ThemeResource ApplicationPageBackgroundThemeBrush}">
+
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+        </Grid.RowDefinitions>
+        
+        <!-- Control Panel -->
+        <StackPanel Grid.Row="0" Orientation="Horizontal" Margin="10" Spacing="10">
+            <Button x:Name="LoadPDFButton" Content="Load PDF" Click="LoadPDFButton_Click"/>
+            <Button x:Name="ClearPreviewButton" Content="Clear Preview" Click="ClearPreviewButton_Click"/>
+            <Button x:Name="TestStreamHandlerButton" Content="Test Stream Handler" Click="TestStreamHandlerButton_Click" 
+                    ToolTipService.ToolTip="Test the custom stream handler registration (for debugging)"/>
+            
+            <!-- PDF Transfer Method Selection -->
+            <StackPanel Orientation="Horizontal" Spacing="5">
+                <TextBlock Text="Transfer Method:" VerticalAlignment="Center"/>
+                <ComboBox x:Name="TransferMethodComboBox" 
+                         Width="200" 
+                         SelectionChanged="TransferMethodComboBox_SelectionChanged"
+                         ToolTipService.ToolTip="Select the PDF transfer method to use"/>
+            </StackPanel>
+            
+            <TextBlock x:Name="StatusText" Text="Ready" VerticalAlignment="Center" Margin="10,0"/>
+        </StackPanel>
+        
+        <!-- WebView2 Control using Microsoft.UI.Xaml.Controls -->
+        <controls:WebView2 x:Name="PDFWebView" 
+                          Grid.Row="1" />
+    </Grid>
+</Page>

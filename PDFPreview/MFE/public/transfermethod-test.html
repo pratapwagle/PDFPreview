@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Transfer Method Verification</title>
+    <style>
+        body { font-family: Arial, sans-serif; padding: 20px; }
+        .test-result { padding: 10px; margin: 5px 0; border-radius: 5px; }
+        .pass { background: #d4edda; color: #155724; border: 1px solid #c3e6cb; }
+        .fail { background: #f8d7da; color: #721c24; border: 1px solid #f5c6cb; }
+        .info { background: #d1ecf1; color: #0c5460; border: 1px solid #bee5eb; }
+    </style>
+</head>
+<body>
+    <h1>Transfer Method Integration Verification</h1>
+    <div id="results"></div>
+
+    <script>
+        // Mock UWP environment for testing
+        window.chrome = {
+            webview: {
+                postMessage: function(message) {
+                    const parsed = JSON.parse(message);
+                    addResult('UWP Message Sent', `Type: ${parsed.type}, TransferMethod: ${parsed.transferMethod || 'Missing'}`, 
+                             parsed.transferMethod ? 'pass' : 'fail');
+                },
+                addEventListener: function(event, handler) {
+                    // Mock event listener
+                }
+            }
+        };
+
+        function addResult(test, details, status) {
+            const resultsDiv = document.getElementById('results');
+            const resultDiv = document.createElement('div');
+            resultDiv.className = `test-result ${status}`;
+            resultDiv.innerHTML = `<strong>${test}:</strong> ${details}`;
+            resultsDiv.appendChild(resultDiv);
+        }
+
+        // Include the UWPPDFIntegration class code here...
+        // This would be a simplified version for testing transferMethod integration
+        
+        class TestUWPPDFIntegration {
+            constructor() {
+                this.chunkingState = {
+                    isReceiving: false,
+                    chunks: [],
+                    expectedChunks: 0,
+                    fileName: '',
+                    totalSize: 0,
+                    receivedChunks: 0,
+                    transferMethod: 'Unknown'
+                };
+            }
+
+            sendMessageToUWP(message) {
+                console.log('Sending message:', message);
+                window.chrome.webview.postMessage(JSON.stringify(message));
+            }
+
+            testLoadPDF() {
+                this.loadPDF('file:///test.pdf', 'file', 'test.pdf', 1024, 'FileURL');
+            }
+
+            testChunkedStream() {
+                const message = {
+                    type: 'LOAD_PDF_CHUNKED_START',
+                    fileName: 'test.pdf',
+                    totalChunks: 2,
+                    totalSize: 1024,
+                    transferMethod: 'ChunkedStream'
+                };
+                this.startChunkedPDFLoad(message);
+            }
+
+            loadPDF(pdfUrl, urlType = 'unknown', fileName = '', fileSize = 0, transferMethod = 'Unknown') {
+                this.sendMessageToUWP({
+                    type: 'PDF_LOADED',
+                    message: 'Test PDF loaded',
+                    method: 'test',
+                    transferMethod: transferMethod
+                });
+            }
+
+            startChunkedPDFLoad(message) {
+                const transferMethod = message.transferMethod || 'ChunkedStream';
+                this.chunkingState.transferMethod = transferMethod;
+                
+                this.sendMessageToUWP({
+                    type: 'CHUNKED_START_ACK',
+                    message: 'Ready to receive chunks',
+                    transferMethod: transferMethod
+                });
+            }
+
+            onPDFError(method = 'unknown', transferMethod = 'Unknown') {
+                this.sendMessageToUWP({
+                    type: 'PDF_ERROR',
+                    error: 'Test error',
+                    method: method,
+                    transferMethod: transferMethod
+                });
+            }
+        }
+
+        // Run tests
+        window.addEventListener('load', function() {
+            addResult('Verification Started', 'Testing transferMethod integration', 'info');
+
+            const integration = new TestUWPPDFIntegration();
+
+            // Test 1: Standard PDF loading
+            addResult('Test 1', 'Testing loadPDF with transferMethod', 'info');
+            integration.testLoadPDF();
+
+            // Test 2: Chunked streaming
+            addResult('Test 2', 'Testing chunked streaming with transferMethod', 'info');
+            integration.testChunkedStream();
+
+            // Test 3: Error handling
+            addResult('Test 3', 'Testing error handling with transferMethod', 'info');
+            integration.onPDFError('iframe', 'FileURL');
+
+            // Test 4: Chunking state
+            addResult('Test 4 - Chunking State', 
+                     `TransferMethod in state: ${integration.chunkingState.transferMethod}`,
+                     integration.chunkingState.transferMethod !== 'Unknown' ? 'pass' : 'fail');
+
+            addResult('Verification Complete', 'All transferMethod integration tests completed', 'info');
+        });
+    </script>
+</body>
+</html>

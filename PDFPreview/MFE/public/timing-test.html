@@ -1,0 +1,363 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PDF Preview Timing Test</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Arial, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background: #f5f5f5;
+        }
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+        .header {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            margin-bottom: 20px;
+        }
+        .test-section {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            margin-bottom: 20px;
+        }
+        .button {
+            background: #007acc;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 4px;
+            cursor: pointer;
+            margin: 5px;
+        }
+        .button:hover {
+            background: #005a9e;
+        }
+        .timing-info {
+            background: #e8f4f8;
+            border: 1px solid #bee5eb;
+            border-radius: 4px;
+            padding: 15px;
+            margin: 15px 0;
+        }
+        .pdf-container {
+            width: 100%;
+            height: 600px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            margin-top: 20px;
+        }
+        .stats {
+            display: flex;
+            gap: 20px;
+            margin: 15px 0;
+        }
+        .stat-box {
+            background: #f8f9fa;
+            border: 1px solid #dee2e6;
+            border-radius: 4px;
+            padding: 15px;
+            text-align: center;
+            flex: 1;
+        }
+        .stat-value {
+            font-size: 1.5em;
+            font-weight: bold;
+            color: #007acc;
+        }
+        .stat-label {
+            font-size: 0.9em;
+            color: #6c757d;
+            margin-top: 5px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>📊 PDF Preview Timing Test</h1>
+            <p>Test PDF loading performance with different methods and track timing metrics.</p>
+        </div>
+
+        <div class="test-section">
+            <h2>🔧 Timing Controls</h2>
+            <button class="button" onclick="testFileUrlLoad()">Test File URL Load</button>
+            <button class="button" onclick="testDataUrlLoad()">Test Data URL Load</button>
+            <button class="button" onclick="testChunkedLoad()">Test Chunked Load</button>
+            <button class="button" onclick="showLastTiming()">Show Last Timing</button>
+            <button class="button" onclick="clearTiming()">Clear Display</button>
+            <button class="button" onclick="testTimingDisplay()">Test Display</button>
+            <button class="button" onclick="forceShowTiming()">Force Show</button>
+        </div>
+
+        <div class="test-section">
+            <h2>🎯 UI Timing Tests</h2>
+            <button class="button" onclick="testUITiming()">Test UI Timing</button>
+            <button class="button" onclick="testUIError()">Test UI Error</button>
+            <button class="button" onclick="simulateLoad()">Simulate PDF Load</button>
+            <button class="button" onclick="resetUIStats()">Reset UI Stats</button>
+        </div>
+
+        <div class="test-section">
+            <h2>📈 Performance Statistics</h2>
+            <div class="stats">
+                <div class="stat-box">
+                    <div class="stat-value" id="last-duration">--</div>
+                    <div class="stat-label">Last Load Time (seconds)</div>
+                </div>
+                <div class="stat-box">
+                    <div class="stat-value" id="last-method">--</div>
+                    <div class="stat-label">Last Method Used</div>
+                </div>
+                <div class="stat-box">
+                    <div class="stat-value" id="total-tests">0</div>
+                    <div class="stat-label">Total Tests Run</div>
+                </div>
+                <div class="stat-box">
+                    <div class="stat-value" id="avg-duration">--</div>
+                    <div class="stat-label">Average Load Time</div>
+                </div>
+            </div>
+        </div>
+
+        <div class="test-section">
+            <h2>ℹ️ About PDF Timing</h2>
+            <div class="timing-info">
+                <h3>What is being measured:</h3>
+                <ul>
+                    <li><strong>PDF Load:</strong> Time from UWP request to PDF preview completion</li>
+                    <li><strong>Chunked Load:</strong> Time for complete chunked transfer and assembly</li>
+                    <li><strong>File URL Load:</strong> Time for direct file:// URL loading</li>
+                    <li><strong>Data URL Load:</strong> Time for Base64 data URL processing</li>
+                </ul>
+                
+                <h3>Timing Display:</h3>
+                <ul>
+                    <li>🔄 Blue: Loading in progress</li>
+                    <li>✅ Green: Load completed successfully</li>
+                    <li>❌ Red: Load failed with error</li>
+                    <li>📊 Gray: Statistics and information</li>
+                </ul>
+            </div>
+        </div>
+
+        <div class="test-section">
+            <h2>📄 PDF Preview Area</h2>
+            <div id="pdf-container" class="pdf-container">
+                <p style="text-align: center; margin-top: 250px; color: #666;">
+                    PDF will appear here when loaded. Timing will be displayed in the top-right corner.
+                </p>
+            </div>
+        </div>
+    </div>
+
+    <!-- Include the UWP PDF Integration -->
+    <script src="uwp-pdf-integration.js"></script>
+    
+    <script>
+        // Timing test statistics
+        let testStats = {
+            totalTests: 0,
+            durations: [],
+            methods: []
+        };
+
+        // Listen for PDF timing messages from the integration
+        if (window.chrome && window.chrome.webview) {
+            window.chrome.webview.addEventListener('message', (event) => {
+                const data = typeof event.data === 'string' ? JSON.parse(event.data) : event.data;
+                if (data.type === 'PDF_TIMING') {
+                    updateStats(data);
+                }
+            });
+        }
+
+        function updateStats(timingData) {
+            testStats.totalTests++;
+            testStats.durations.push(timingData.durationSec);
+            testStats.methods.push(timingData.operation);
+
+            // Update display
+            document.getElementById('last-duration').textContent = timingData.durationSec.toFixed(2);
+            document.getElementById('last-method').textContent = timingData.operation;
+            document.getElementById('total-tests').textContent = testStats.totalTests;
+            
+            if (testStats.durations.length > 0) {
+                const avg = testStats.durations.reduce((a, b) => a + b, 0) / testStats.durations.length;
+                document.getElementById('avg-duration').textContent = avg.toFixed(2);
+            }
+        }
+
+        function testFileUrlLoad() {
+            if (uwpPDFIntegration) {
+                // Simulate a file URL load
+                const testFileUrl = 'file:///C:/Windows/System32/drivers/etc/hosts';
+                console.log('Testing file URL load...');
+                uwpPDFIntegration.startTiming('Test File URL Load');
+                
+                // Simulate completion after 1.5 seconds
+                setTimeout(() => {
+                    uwpPDFIntegration.completeTiming('Test File URL Load');
+                }, 1500);
+            }
+        }
+
+        function testDataUrlLoad() {
+            if (uwpPDFIntegration) {
+                console.log('Testing data URL load...');
+                uwpPDFIntegration.startTiming('Test Data URL Load');
+                
+                // Simulate completion after 2 seconds
+                setTimeout(() => {
+                    uwpPDFIntegration.completeTiming('Test Data URL Load');
+                }, 2000);
+            }
+        }
+
+        function testChunkedLoad() {
+            if (uwpPDFIntegration) {
+                console.log('Testing chunked load...');
+                uwpPDFIntegration.startTiming('Test Chunked Load');
+                
+                // Simulate completion after 3 seconds
+                setTimeout(() => {
+                    uwpPDFIntegration.completeTiming('Test Chunked Load');
+                }, 3000);
+            }
+        }
+
+        function showLastTiming() {
+            if (uwpPDFIntegration) {
+                uwpPDFIntegration.showTimingStats();
+            }
+        }
+
+        function clearTiming() {
+            if (uwpPDFIntegration) {
+                uwpPDFIntegration.hideTimingDisplay();
+            }
+        }
+
+        function testTimingDisplay() {
+            console.log('Testing timing display...');
+            if (uwpPDFIntegration) {
+                uwpPDFIntegration.updateTimingDisplay('🧪 Testing display functionality', 'info');
+            } else {
+                console.error('uwpPDFIntegration not available');
+                alert('uwpPDFIntegration not loaded yet');
+            }
+        }
+
+        function forceShowTiming() {
+            console.log('Force showing timing display...');
+            // Create display manually if needed
+            let display = document.getElementById('pdf-timing-display');
+            if (!display) {
+                display = document.createElement('div');
+                display.id = 'pdf-timing-display';
+                display.style.cssText = `
+                    position: fixed;
+                    top: 10px;
+                    right: 10px;
+                    background: rgba(220, 53, 69, 0.9);
+                    color: white;
+                    padding: 8px 12px;
+                    border-radius: 6px;
+                    font-family: 'Segoe UI', Arial, sans-serif;
+                    font-size: 12px;
+                    z-index: 10000;
+                    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+                    min-width: 200px;
+                    display: block;
+                    border: 2px solid white;
+                `;
+                document.body.appendChild(display);
+                console.log('Manually created timing display');
+            }
+            
+            display.style.display = 'block';
+            display.innerHTML = '🔧 Force Display Test - Working!';
+            console.log('Timing display should now be visible');
+            
+            setTimeout(() => {
+                display.style.display = 'none';
+            }, 5000);
+        }
+
+        // UI Timing Test Functions
+        function testUITiming() {
+            console.log('Testing UI timing display...');
+            if (window.debugTimingDisplay) {
+                window.debugTimingDisplay.testUI();
+            } else {
+                console.error('Debug timing display not available');
+            }
+        }
+
+        function testUIError() {
+            console.log('Testing UI error display...');
+            if (window.debugTimingDisplay) {
+                window.debugTimingDisplay.testError();
+            } else {
+                console.error('Debug timing display not available');
+            }
+        }
+
+        function simulateLoad() {
+            console.log('Simulating full PDF load cycle...');
+            if (uwpPDFIntegration) {
+                uwpPDFIntegration.startTiming('Simulated PDF Load');
+                
+                // Simulate loading delay
+                setTimeout(() => {
+                    const randomDelay = Math.random() * 2000 + 500; // 0.5-2.5 seconds
+                    setTimeout(() => {
+                        uwpPDFIntegration.completeTiming('Simulated PDF Preview');
+                    }, randomDelay);
+                }, 100);
+            }
+        }
+
+        function resetUIStats() {
+            console.log('Resetting UI timing statistics...');
+            if (uwpPDFIntegration && uwpPDFIntegration.uiTimingState) {
+                uwpPDFIntegration.uiTimingState.totalLoads = 0;
+                uwpPDFIntegration.uiTimingState.durations = [];
+                
+                // Reset UI elements
+                const avgDuration = document.getElementById('avgDuration');
+                const totalLoads = document.getElementById('totalLoads');
+                const lastDuration = document.getElementById('lastDuration');
+                const lastMethod = document.getElementById('lastMethod');
+                
+                if (avgDuration) avgDuration.textContent = '--';
+                if (totalLoads) totalLoads.textContent = '0 loads completed';
+                if (lastDuration) lastDuration.textContent = '--';
+                if (lastMethod) lastMethod.textContent = 'No previous loads';
+                
+                console.log('UI timing statistics reset');
+            }
+        }
+
+        // Initialize message to show timing is ready
+        document.addEventListener('DOMContentLoaded', () => {
+            setTimeout(() => {
+                if (uwpPDFIntegration) {
+                    uwpPDFIntegration.updateTimingDisplay('📊 Timing system ready', 'info');
+                    setTimeout(() => {
+                        uwpPDFIntegration.hideTimingDisplay();
+                    }, 3000);
+                }
+            }, 1000);
+        });
+    </script>
+</body>
+</html>

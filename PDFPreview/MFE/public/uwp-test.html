@@ -1,0 +1,410 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>UWP WebView2 Test</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            padding: 20px;
+            background: #f0f0f0;
+        }
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+            background: white;
+            padding: 20px;
+            border-radius: 10px;
+            box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+        }
+        button {
+            padding: 10px 20px;
+            margin: 5px;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 16px;
+        }
+        .test-btn { background: #4CAF50; color: white; }
+        .clear-btn { background: #f44336; color: white; }
+        #messages {
+            background: #f9f9f9;
+            padding: 10px;
+            border-radius: 5px;
+            margin-top: 20px;
+            height: 200px;
+            overflow-y: scroll;
+            font-family: monospace;
+            font-size: 12px;
+        }
+        iframe {
+            width: 100%;
+            height: 400px;
+            border: 1px solid #ccc;
+            margin-top: 20px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>UWP WebView2 Integration Test</h1>
+        <p>This page tests communication between UWP and the PDF Preview web application.</p>
+        
+        <div>
+            <button class="test-btn" onclick="testLoadPDF()">Test Load PDF</button>
+            <button class="clear-btn" onclick="testClearPreview()">Test Clear Preview</button>
+            <button class="test-btn" onclick="checkWebView()">Check WebView2</button>
+        </div>
+        
+        <div>
+            <h3>Test New UWP Message Format:</h3>
+            <button class="test-btn" onclick="testNewLoadPDF()">Test LOAD_PDF (File URL)</button>
+            <button class="test-btn" onclick="testCustomStreamPDF()">Test Custom Stream (uwp-pdf://)</button>
+            <button class="test-btn" onclick="testChunkedStreamPDF()">Test Chunked Stream</button>
+            <button class="test-btn" onclick="testNewClearPDF()">Test CLEAR_PDF Message</button>
+            <button class="test-btn" onclick="testVirtualHostPath()">Test Virtual Host URL</button>
+            <button class="test-btn" onclick="testDataUrlPDF()">Test Data URL PDF</button>
+        </div>
+        
+        <div>
+            <h3>Test Legacy Message Format:</h3>
+            <button class="test-btn" onclick="testLegacyLoadPDF()">Test loadPDF Message</button>
+            <button class="test-btn" onclick="testLegacyClear()">Test clearPreview Message</button>
+        </div>
+        
+        <div id="messages">
+            <div>Messages will appear here...</div>
+        </div>
+        
+        <iframe src="/" id="pdfPreview"></iframe>
+    </div>
+
+    <script>
+        const messagesDiv = document.getElementById('messages');
+        const iframe = document.getElementById('pdfPreview');
+        
+        function logMessage(message) {
+            const timestamp = new Date().toLocaleTimeString();
+            messagesDiv.innerHTML += `<div>[${timestamp}] ${message}</div>`;
+            messagesDiv.scrollTop = messagesDiv.scrollHeight;
+        }
+        
+        function checkWebView() {
+            const isWebView2 = window.chrome && window.chrome.webview;
+            logMessage(`WebView2 Available: ${isWebView2}`);
+            
+            if (isWebView2) {
+                logMessage('Setting up WebView2 communication...');
+                setupWebViewCommunication();
+            } else {
+                logMessage('Running in regular browser - WebView2 features not available');
+            }
+        }
+        
+        function setupWebViewCommunication() {
+            if (window.chrome && window.chrome.webview) {
+                window.chrome.webview.addEventListener('message', (event) => {
+                    logMessage(`Received from WebView: ${JSON.stringify(event.data)}`);
+                });
+                
+                logMessage('WebView2 message listener registered');
+            }
+        }
+        
+        function sendToWebView(message) {
+            try {
+                // Send as JSON string to match UWP PostWebMessageAsString format
+                const jsonMessage = JSON.stringify(message);
+                iframe.contentWindow.postMessage(jsonMessage, '*');
+                logMessage(`Sent to iframe (JSON): ${jsonMessage}`);
+            } catch (error) {
+                logMessage(`Error sending to iframe: ${error.message}`);
+            }
+        }
+        
+        function testLoadPDF() {
+            const message = {
+                type: 'loadPDF',
+                filePath: 'C:\\Users\\waglep\\Downloads\\dors_isac_registration-2025-07-03.pdf'
+            };
+            sendToWebView(message);
+        }
+        
+        function testClearPreview() {
+            const message = {
+                type: 'clearPreview'
+            };
+            sendToWebView(message);
+        }
+        
+        function loadTestPDF1() {
+            const message = {
+                type: 'loadPDF',
+                filePath: 'C:\\Windows\\System32\\drivers\\etc\\hosts'
+            };
+            sendToWebView(message);
+        }
+        
+        function loadTestPDF2() {
+            const message = {
+                type: 'loadPDF',
+                filePath: 'C:\\Users\\Public\\Documents\\sample2.pdf'
+            };
+            sendToWebView(message);
+        }
+        
+        function loadCustomPath() {
+            const customPath = document.getElementById('customPath').value;
+            if (!customPath) {
+                alert('Please enter a custom PDF path');
+                return;
+            }
+            
+            const message = {
+                type: 'loadPDF',
+                filePath: customPath
+            };
+            sendToWebView(message);
+            logMessage(`Testing custom path: ${customPath}`);
+        }
+        
+        function testUWPConfig() {
+            logMessage('Testing UWP configuration...');
+            fetch('/api/uwp/config')
+                .then(response => response.json())
+                .then(data => {
+                    logMessage(`UWP Config: ${JSON.stringify(data, null, 2)}`);
+                })
+                .catch(error => {
+                    logMessage(`UWP Config Error: ${error.message}`);
+                });
+        }
+        
+        function testUWPStatus() {
+            logMessage('Testing UWP status...');
+            fetch('/api/uwp/status')
+                .then(response => response.json())
+                .then(data => {
+                    logMessage(`UWP Status: ${JSON.stringify(data, null, 2)}`);
+                })
+                .catch(error => {
+                    logMessage(`UWP Status Error: ${error.message}`);
+                });
+        }
+        
+        function simulateUWPError() {
+            const message = {
+                type: 'loadPDF',
+                filePath: 'C:\\NonExistent\\InvalidPath\\test.pdf'
+            };
+            sendToWebView(message);
+            logMessage('Simulating error with invalid file path');
+        }
+        
+        // Test functions for new UWP message format (matches sample-mfe-integration.js)
+        function testNewLoadPDF() {
+            const message = {
+                type: 'LOAD_PDF',
+                fileName: 'license.rtf',
+                pdfUrl: 'file:///C:/Windows/System32/license.rtf', // Using a known system file for testing
+                urlType: 'file',
+                transferMethod: 'FileURL',
+                timestamp: new Date().toISOString()
+            };
+            sendToWebView(message);
+            logMessage('Sent LOAD_PDF message with file URL (Method: FileURL)');
+        }
+
+        function testCustomStreamPDF() {
+            const message = {
+                type: 'LOAD_PDF',
+                fileName: 'sample-document.pdf',
+                pdfUrl: 'uwp-pdf://a1b2c3d4e5f6g7h8i9j0k1l2m3n4o5p6', // Simulated stream identifier
+                urlType: 'stream',
+                transferMethod: 'CustomStream',
+                fileSize: 2457600,
+                timestamp: new Date().toISOString()
+            };
+            sendToWebView(message);
+            logMessage('Sent LOAD_PDF message with custom stream URL (uwp-pdf://, Method: CustomStream)');
+        }
+
+        function testNewClearPDF() {
+            const message = {
+                type: 'CLEAR_PDF'
+            };
+            sendToWebView(message);
+            logMessage('Sent CLEAR_PDF message');
+        }
+
+        function testVirtualHostPath() {
+            const message = {
+                type: 'LOAD_PDF',
+                fileName: 'sample.pdf',
+                pdfUrl: 'https://pdf-assets.uwp/TestDocuments/sample.pdf',
+                urlType: 'virtual-host',
+                transferMethod: 'VirtualHost',
+                timestamp: new Date().toISOString()
+            };
+            sendToWebView(message);
+            logMessage('Sent LOAD_PDF with virtual host path (Method: VirtualHost)');
+        }
+        
+        function testDataUrlPDF() {
+            // Minimal PDF data URL for testing
+            const pdfDataUrl = 'data:application/pdf;base64,JVBERi0xLjQKJdPr6eEKMSAwIG9iago8PAovVHlwZSAvQ2F0YWxvZwovUGFnZXMgMiAwIFIKPj4KZW5kb2JqCgoyIDAgb2JqCjw8Ci9UeXBlIC9QYWdlcwovS2lkcyBbMyAwIFJdCi9Db3VudCAxCj4+CmVuZG9iagoKMyAwIG9iago8PAovVHlwZSAvUGFnZQovUGFyZW50IDIgMCBSCi9NZWRpYUJveCBbMCAwIDYxMiA3OTJdCi9SZXNvdXJjZXMgPDwKL0ZvbnQgPDwKL0YxIDQgMCBSCj4+Cj4+Ci9Db250ZW50cyA1IDAgUgo+PgplbmRvYmoKCjQgMCBvYmoKPDwKL1R5cGUgL0ZvbnQKL1N1YnR5cGUgL1R5cGUxCi9CYXNlRm9udCAvSGVsdmV0aWNhCj4+CmVuZG9iagoKNSAwIG9iago8PAovTGVuZ3RoIDQ0Cj4+CnN0cmVhbQpCVAovRjEgMTIgVGYKNzIgNzIwIFRkCihIZWxsbyBXb3JsZCkgVGoKRVQKZW5kc3RyZWFtCmVuZG9iagoKeHJlZgowIDYKMDAwMDAwMDAwMCA2NTUzNSBmIAowMDAwMDAwMDA5IDAwMDAwIG4gCjAwMDAwMDAwNTg4MDAwMDAgbiAKMDAwMDAwMDExNSAwMDAwMCBuIAowMDAwMDAwMjQ1IDAwMDAwIG4gCjAwMDAwMDAzMjQgMDAwMDAgbiAKdHJhaWxlcgo8PAovU2l6ZSA2Ci9Sb290IDEgMCBSCj4+CnN0YXJ0eHJlZgo0MTQKJSVFT0YK';
+            const message = {
+                type: 'LOAD_PDF',
+                fileName: 'hello-world.pdf',
+                pdfUrl: pdfDataUrl,
+                urlType: 'data',
+                transferMethod: 'DataURL',
+                fileSize: 414,
+                timestamp: new Date().toISOString()
+            };
+            sendToWebView(message);
+            logMessage('Sent LOAD_PDF message with data URL (Method: DataURL)');
+        }
+
+        function testLegacyLoadPDF() {
+            const message = {
+                type: 'loadPDF',
+                filePath: 'ms-appdata:///local/sample.pdf'
+            };
+            sendToWebView(message);
+            logMessage('Sent legacy loadPDF message');
+        }
+
+        function testLegacyClear() {
+            const message = {
+                type: 'clearPreview'
+            };
+            sendToWebView(message);
+            logMessage('Sent legacy clearPreview message');
+        }
+        
+        // Listen for messages from iframe
+        window.addEventListener('message', (event) => {
+            if (event.source === iframe.contentWindow) {
+                let messageData = event.data;
+                
+                // Handle both JSON string and object formats
+                if (typeof messageData === 'string') {
+                    try {
+                        messageData = JSON.parse(messageData);
+                    } catch (e) {
+                        logMessage(`Received non-JSON string from PDF app: ${messageData}`);
+                        return;
+                    }
+                }
+                
+                logMessage(`Received from PDF app: ${JSON.stringify(messageData)}`);
+                
+                // Handle specific message types
+                if (messageData.type) {
+                    switch (messageData.type) {
+                        case 'MFE_READY':
+                            logMessage('✅ MFE initialized and ready for PDF loading');
+                            break;
+                        case 'PDF_LOADED':
+                            logMessage(`✅ PDF loaded successfully: ${messageData.message} (method: ${messageData.method || 'unknown'})`);
+                            if (messageData.chunks) {
+                                logMessage(`📊 Chunks processed: ${messageData.chunks}`);
+                            }
+                            break;
+                        case 'PDF_LOADING':
+                            logMessage(`🔄 Loading PDF: ${messageData.message} (method: ${messageData.method || 'unknown'})`);
+                            break;
+                        case 'PDF_CLEARED':
+                            logMessage('🗑️ PDF preview cleared');
+                            break;
+                        case 'PDF_ERROR':
+                            logMessage(`❌ PDF Error: ${messageData.error} (method: ${messageData.method || 'unknown'})`);
+                            break;
+                        case 'MESSAGE_ERROR':
+                            logMessage(`❌ Message Error: ${messageData.error}`);
+                            break;
+                        case 'CHUNKED_START_ACK':
+                            logMessage(`✅ Chunked Start Acknowledged: ${messageData.message}`);
+                            break;
+                        // Legacy message types
+                        case 'ready':
+                            logMessage('✅ PDF Preview app is ready for UWP commands (legacy)');
+                            break;
+                        case 'pdfLoaded':
+                            logMessage('✅ PDF loaded successfully in preview (legacy)');
+                            break;
+                        case 'error':
+                            logMessage(`❌ Error (legacy): ${messageData.message}`);
+                            break;
+                        case 'status':
+                            logMessage(`ℹ️ Status: ${messageData.message}`);
+                            break;
+                        default:
+                            logMessage(`📧 Unknown message type: ${messageData.type}`);
+                    }
+                }
+            }
+        });
+        
+        // Initialize
+        document.addEventListener('DOMContentLoaded', () => {
+            logMessage('UWP Test page loaded');
+            checkWebView();
+            
+            iframe.addEventListener('load', () => {
+                logMessage('PDF Preview iframe loaded');
+            });
+        });
+        
+        function testChunkedStreamPDF() {
+            // Simulate chunked PDF loading with a real minimal PDF
+            const fileName = 'sample-chunked-document.pdf';
+            const totalChunks = 3;
+            const totalSize = 1024000; // 1MB simulated
+            
+            // Valid minimal PDF in Base64 - split into 3 chunks
+            const fullPdfBase64 = 'JVBERi0xLjQKJdPr6eEKMSAwIG9iago8PAovVHlwZSAvQ2F0YWxvZwovUGFnZXMgMiAwIFIKPj4KZW5kb2JqCgoyIDAgb2JqCjw8Ci9UeXBlIC9QYWdlcwovS2lkcyBbMyAwIFJdCi9Db3VudCAxCj4+CmVuZG9iagoKMyAwIG9iago8PAovVHlwZSAvUGFnZQovUGFyZW50IDIgMCBSCi9NZWRpYUJveCBbMCAwIDYxMiA3OTJdCi9SZXNvdXJjZXMgPDwKL0ZvbnQgPDwKL0YxIDQgMCBSCj4+Cj4+Ci9Db250ZW50cyA1IDAgUgo+PgplbmRvYmoKCjQgMCBvYmoKPDwKL1R5cGUgL0ZvbnQKL1N1YnR5cGUgL1R5cGUxCi9CYXNlRm9udCAvSGVsdmV0aWNhCj4+CmVuZG9iagoKNSAwIG9iago8PAovTGVuZ3RoIDQ0Cj4+CnN0cmVhbQpCVAovRjEgMTIgVGYKNzIgNzIwIFRkCihIZWxsbyBXb3JsZCkgVGoKRVQKZW5kc3RyZWFtCmVuZG9iagoKeHJlZgowIDYKMDAwMDAwMDAwMCA2NTUzNSBmIAowMDAwMDAwMDA5IDAwMDAwIG4gCjAwMDAwMDAwNTggMDAwMDAgbiAKMDAwMDAwMDExNSAwMDAwMCBuIAowMDAwMDAwMjQ1IDAwMDAwIG4gCjAwMDAwMDAzMjQgMDAwMDAgbiAKdHJhaWxlcgo8PAovU2l6ZSA2Ci9Sb290IDEgMCBSCj4+CnN0YXJ0eHJlZgo0MTQKJSVFT0YK';
+            
+            // Split the PDF Base64 into 3 chunks
+            const chunkSize = Math.ceil(fullPdfBase64.length / totalChunks);
+            const chunks = [];
+            for (let i = 0; i < totalChunks; i++) {
+                const start = i * chunkSize;
+                const end = Math.min(start + chunkSize, fullPdfBase64.length);
+                chunks.push(fullPdfBase64.substring(start, end));
+            }
+            
+            console.log('Created chunks:', chunks.map((chunk, i) => `Chunk ${i}: ${chunk.length} chars`));
+            
+            // Step 1: Start chunked load
+            const startMessage = {
+                type: 'LOAD_PDF_CHUNKED_START',
+                fileName: fileName,
+                totalChunks: totalChunks,
+                totalSize: totalSize,
+                transferMethod: 'ChunkedStream',
+                timestamp: new Date().toISOString()
+            };
+            sendToWebView(startMessage);
+            logMessage('Sent LOAD_PDF_CHUNKED_START message (Method: ChunkedStream)');
+            
+            // Step 2: Send chunks with delay to simulate real chunking
+            chunks.forEach((chunkData, index) => {
+                setTimeout(() => {
+                    const chunkMessage = {
+                        type: 'LOAD_PDF_CHUNK',
+                        chunkIndex: index,
+                        chunkData: chunkData,
+                        isLastChunk: (index === totalChunks - 1),
+                        timestamp: new Date().toISOString()
+                    };
+                    sendToWebView(chunkMessage);
+                    logMessage(`Sent chunk ${index}/${totalChunks - 1} (${chunkData.length} chars)${chunkMessage.isLastChunk ? ' [FINAL]' : ''}`);
+                }, (index + 1) * 500); // 500ms delay between chunks
+            });
+        }
+    </script>
+</body>
+</html>

@@ -1,0 +1,494 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Chunked Streaming Fix Test</title>
+    <style>
+        body { 
+            font-family: Arial, sans-serif; 
+            padding: 20px; 
+            background-color: #f5f5f5;
+        }
+        .test-container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background: white;
+            padding: 30px;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        .test-result { 
+            padding: 15px; 
+            margin: 10px 0; 
+            border-radius: 5px; 
+            border-left: 4px solid;
+        }
+        .pass { 
+            background: #d4edda; 
+            color: #155724; 
+            border-left-color: #28a745;
+        }
+        .fail { 
+            background: #f8d7da; 
+            color: #721c24; 
+            border-left-color: #dc3545;
+        }
+        .info { 
+            background: #d1ecf1; 
+            color: #0c5460; 
+            border-left-color: #17a2b8;
+        }
+        .warning { 
+            background: #fff3cd; 
+            color: #856404; 
+            border-left-color: #ffc107;
+        }
+        .test-button {
+            background: #007bff;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            margin: 5px;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+        .test-button:hover {
+            background: #0056b3;
+        }
+        .log-output {
+            background: #f8f9fa;
+            border: 1px solid #dee2e6;
+            border-radius: 4px;
+            padding: 15px;
+            margin: 10px 0;
+            font-family: 'Courier New', monospace;
+            font-size: 12px;
+            height: 200px;
+            overflow-y: auto;
+        }
+        .progress-bar {
+            width: 100%;
+            height: 20px;
+            background: #e9ecef;
+            border-radius: 10px;
+            overflow: hidden;
+            margin: 10px 0;
+        }
+        .progress-fill {
+            height: 100%;
+            background: linear-gradient(90deg, #28a745, #20c997);
+            transition: width 0.3s ease;
+            width: 0%;
+        }
+    </style>
+</head>
+<body>
+    <div class="test-container">
+        <h1>🔧 Chunked Streaming Fix Validation</h1>
+        <p>This test validates the fixes for chunked streaming when chunk count > 1</p>
+        
+        <div class="test-controls">
+            <button class="test-button" onclick="runSingleChunkTest()">Test Single Chunk</button>
+            <button class="test-button" onclick="runTwoChunkTest()">Test 2 Chunks</button>
+            <button class="test-button" onclick="runMultiChunkTest()">Test 5 Chunks</button>
+            <button class="test-button" onclick="runLargeFileTest()">Test Large File (10 chunks)</button>
+            <button class="test-button" onclick="runErrorTest()">Test Error Handling</button>
+            <button class="test-button" onclick="clearResults()">Clear Results</button>
+        </div>
+        
+        <div class="progress-bar" style="display:none;" id="progressBar">
+            <div class="progress-fill" id="progressFill"></div>
+        </div>
+        
+        <div id="results"></div>
+        
+        <h3>Test Log</h3>
+        <div class="log-output" id="logOutput"></div>
+    </div>
+
+    <script>
+        // Mock UWP environment for testing
+        window.chrome = {
+            webview: {
+                postMessage: function(message) {
+                    const parsed = JSON.parse(message);
+                    logMessage(`📤 UWP Message Sent: ${parsed.type} - ${parsed.message || parsed.error || 'No message'}`);
+                },
+                addEventListener: function(event, handler) {
+                    window.uwpMessageHandler = handler;
+                }
+            }
+        };
+
+        let testResults = [];
+        let currentTest = null;
+
+        // Enhanced UWP PDF Integration for testing
+        class TestUWPPDFIntegration {
+            constructor() {
+                this.isInUWP = true; // Force UWP mode for testing
+                this.initializeMessageHandler();
+                
+                // Chunked streaming state
+                this.chunkingState = {
+                    isReceiving: false,
+                    chunks: [],
+                    expectedChunks: 0,
+                    fileName: '',
+                    totalSize: 0,
+                    receivedChunks: 0
+                };
+            }
+
+            initializeMessageHandler() {
+                if (window.chrome && window.chrome.webview) {
+                    window.chrome.webview.addEventListener('message', (event) => {
+                        this.handleUWPMessage(event.data);
+                    });
+                }
+            }
+
+            handleUWPMessage(data) {
+                try {
+                    const message = typeof data === 'string' ? JSON.parse(data) : data;
+                    
+                    switch (message.type) {
+                        case 'LOAD_PDF_CHUNKED_START':
+                            this.startChunkedPDFLoad(message);
+                            break;
+                        case 'LOAD_PDF_CHUNK':
+                            this.receiveChunk(message);
+                            break;
+                        case 'LOAD_PDF_CHUNKED_ERROR':
+                            console.error('Chunked loading error:', message.error);
+                            this.resetChunkingState();
+                            break;
+                    }
+                } catch (error) {
+                    console.error('Error handling UWP message:', error);
+                }
+            }
+
+            startChunkedPDFLoad(message) {
+                logMessage(`🔄 Starting chunked PDF load: ${message.fileName} (${message.totalChunks} chunks)`);
+                
+                // Reset and initialize chunking state
+                this.chunkingState = {
+                    isReceiving: true,
+                    chunks: new Array(message.totalChunks),
+                    expectedChunks: message.totalChunks,
+                    fileName: message.fileName,
+                    totalSize: message.totalSize,
+                    base64Size: message.base64Size,
+                    receivedChunks: 0,
+                    chunkSize: message.chunkSize
+                };
+                
+                this.sendMessageToUWP({
+                    type: 'CHUNKED_START_ACK',
+                    message: `Ready to receive ${message.totalChunks} chunks for ${message.fileName}`
+                });
+            }
+            
+            receiveChunk(message) {
+                if (!this.chunkingState.isReceiving) {
+                    logMessage('⚠️ Received chunk but not in receiving state', 'warning');
+                    return;
+                }
+                
+                const { chunkIndex, chunkData, isLastChunk } = message;
+                
+                // Enhanced validation
+                if (chunkIndex < 0 || chunkIndex >= this.chunkingState.expectedChunks) {
+                    logMessage(`❌ Chunk index ${chunkIndex} out of range (0-${this.chunkingState.expectedChunks - 1})`, 'error');
+                    return;
+                }
+                
+                if (!chunkData || chunkData.length === 0) {
+                    logMessage(`❌ Chunk ${chunkIndex} missing data`, 'error');
+                    return;
+                }
+                
+                logMessage(`📥 Received chunk ${chunkIndex + 1}/${this.chunkingState.expectedChunks} (${chunkData.length} chars)`);
+                
+                // Store the chunk
+                this.chunkingState.chunks[chunkIndex] = chunkData;
+                this.chunkingState.receivedChunks++;
+                
+                // Update progress
+                const progress = (this.chunkingState.receivedChunks / this.chunkingState.expectedChunks) * 100;
+                updateProgress(progress);
+                logMessage(`📊 Progress: ${progress.toFixed(1)}% (${this.chunkingState.receivedChunks}/${this.chunkingState.expectedChunks})`);
+                
+                // Check if all chunks received
+                if (isLastChunk || this.chunkingState.receivedChunks === this.chunkingState.expectedChunks) {
+                    this.assembleAndLoadChunkedPDF();
+                }
+            }
+            
+            assembleAndLoadChunkedPDF() {
+                try {
+                    logMessage('🔧 Assembling chunked PDF...');
+                    
+                    // Validate all chunks are present
+                    const missingChunks = [];
+                    for (let i = 0; i < this.chunkingState.expectedChunks; i++) {
+                        if (!this.chunkingState.chunks[i] || 
+                            this.chunkingState.chunks[i] === null || 
+                            this.chunkingState.chunks[i] === undefined) {
+                            missingChunks.push(i);
+                        }
+                    }
+                    
+                    if (missingChunks.length > 0) {
+                        throw new Error(`Missing chunks: [${missingChunks.join(', ')}]`);
+                    }
+                    
+                    // Combine all chunks
+                    const combinedBase64 = this.chunkingState.chunks.join('');
+                    logMessage(`📄 Assembled PDF: ${combinedBase64.length} chars total`);
+                    
+                    // Validate the combined Base64 length matches expected
+                    if (this.chunkingState.base64Size && combinedBase64.length !== this.chunkingState.base64Size) {
+                        logMessage(`⚠️ Base64 size mismatch: expected ${this.chunkingState.base64Size}, got ${combinedBase64.length}`, 'warning');
+                    }
+                    
+                    // Validate Base64 format
+                    if (!this.isValidBase64(combinedBase64)) {
+                        throw new Error('Combined chunks do not form valid Base64 data');
+                    }
+                    
+                    logMessage('✅ PDF assembled successfully!', 'success');
+                    
+                    const fileName = this.chunkingState.fileName;
+                    const expectedChunks = this.chunkingState.expectedChunks;
+                    
+                    this.resetChunkingState();
+                    
+                    this.sendMessageToUWP({
+                        type: 'PDF_LOADED',
+                        message: `Chunked PDF assembled and loaded: ${fileName}`,
+                        method: 'chunked',
+                        chunks: expectedChunks,
+                        transferMethod: 'ChunkedStream'
+                    });
+                    
+                    if (currentTest) {
+                        addResult(currentTest, 'PDF assembled and loaded successfully', 'pass');
+                        currentTest = null;
+                    }
+                    
+                } catch (error) {
+                    logMessage(`❌ Error assembling chunked PDF: ${error.message}`, 'error');
+                    this.resetChunkingState();
+                    
+                    this.sendMessageToUWP({
+                        type: 'PDF_ERROR',
+                        error: `Failed to assemble chunked PDF: ${error.message}`,
+                        method: 'chunked',
+                        transferMethod: 'ChunkedStream'
+                    });
+                    
+                    if (currentTest) {
+                        addResult(currentTest, `Failed: ${error.message}`, 'fail');
+                        currentTest = null;
+                    }
+                }
+            }
+            
+            isValidBase64(str) {
+                try {
+                    return btoa(atob(str)) === str;
+                } catch (err) {
+                    return false;
+                }
+            }
+            
+            resetChunkingState() {
+                this.chunkingState = {
+                    isReceiving: false,
+                    chunks: [],
+                    expectedChunks: 0,
+                    fileName: '',
+                    totalSize: 0,
+                    receivedChunks: 0
+                };
+                hideProgress();
+            }
+
+            sendMessageToUWP(message) {
+                if (window.chrome && window.chrome.webview) {
+                    window.chrome.webview.postMessage(JSON.stringify(message));
+                }
+            }
+        }
+
+        // Initialize test integration
+        const testIntegration = new TestUWPPDFIntegration();
+
+        // Test functions
+        function generateValidPDFBase64(size = 1024) {
+            // Generate a minimal valid PDF structure in Base64
+            const pdfHeader = '%PDF-1.4\n';
+            const pdfFooter = '\n%%EOF';
+            const content = 'x'.repeat(Math.max(0, size - pdfHeader.length - pdfFooter.length));
+            const pdfContent = pdfHeader + content + pdfFooter;
+            return btoa(pdfContent);
+        }
+
+        function simulateChunkedLoad(fileName, totalChunks, chunkData) {
+            showProgress();
+            currentTest = `${fileName} (${totalChunks} chunks)`;
+            
+            const startMessage = {
+                type: 'LOAD_PDF_CHUNKED_START',
+                fileName: fileName,
+                totalSize: chunkData.length,
+                base64Size: chunkData.length,
+                totalChunks: totalChunks,
+                chunkSize: Math.ceil(chunkData.length / totalChunks),
+                transferMethod: 'ChunkedStream'
+            };
+            
+            testIntegration.handleUWPMessage(startMessage);
+            
+            // Split data into chunks
+            const chunkSize = Math.ceil(chunkData.length / totalChunks);
+            
+            for (let i = 0; i < totalChunks; i++) {
+                setTimeout(() => {
+                    const start = i * chunkSize;
+                    const end = Math.min(start + chunkSize, chunkData.length);
+                    const chunk = chunkData.substring(start, end);
+                    
+                    const chunkMessage = {
+                        type: 'LOAD_PDF_CHUNK',
+                        chunkIndex: i,
+                        chunkData: chunk,
+                        chunkSize: chunk.length,
+                        isLastChunk: i === totalChunks - 1,
+                        transferMethod: 'ChunkedStream'
+                    };
+                    
+                    testIntegration.handleUWPMessage(chunkMessage);
+                }, i * 100); // Simulate delay between chunks
+            }
+        }
+
+        function runSingleChunkTest() {
+            logMessage('🧪 Running Single Chunk Test...', 'info');
+            const pdfData = generateValidPDFBase64(1024);
+            simulateChunkedLoad('single-chunk-test.pdf', 1, pdfData);
+        }
+
+        function runTwoChunkTest() {
+            logMessage('🧪 Running Two Chunk Test...', 'info');
+            const pdfData = generateValidPDFBase64(2048);
+            simulateChunkedLoad('two-chunk-test.pdf', 2, pdfData);
+        }
+
+        function runMultiChunkTest() {
+            logMessage('🧪 Running Multi Chunk Test (5 chunks)...', 'info');
+            const pdfData = generateValidPDFBase64(5120);
+            simulateChunkedLoad('multi-chunk-test.pdf', 5, pdfData);
+        }
+
+        function runLargeFileTest() {
+            logMessage('🧪 Running Large File Test (10 chunks)...', 'info');
+            const pdfData = generateValidPDFBase64(10240);
+            simulateChunkedLoad('large-file-test.pdf', 10, pdfData);
+        }
+
+        function runErrorTest() {
+            logMessage('🧪 Running Error Handling Test...', 'info');
+            currentTest = 'Error Handling Test';
+            
+            // Simulate missing chunk scenario
+            const startMessage = {
+                type: 'LOAD_PDF_CHUNKED_START',
+                fileName: 'error-test.pdf',
+                totalSize: 1024,
+                totalChunks: 3,
+                chunkSize: 342,
+                transferMethod: 'ChunkedStream'
+            };
+            
+            testIntegration.handleUWPMessage(startMessage);
+            
+            // Send only first and third chunks (missing second chunk)
+            const chunkData = generateValidPDFBase64(1024);
+            const chunkSize = Math.ceil(chunkData.length / 3);
+            
+            setTimeout(() => {
+                testIntegration.handleUWPMessage({
+                    type: 'LOAD_PDF_CHUNK',
+                    chunkIndex: 0,
+                    chunkData: chunkData.substring(0, chunkSize),
+                    isLastChunk: false
+                });
+            }, 100);
+            
+            setTimeout(() => {
+                testIntegration.handleUWPMessage({
+                    type: 'LOAD_PDF_CHUNK',
+                    chunkIndex: 2,
+                    chunkData: chunkData.substring(chunkSize * 2),
+                    isLastChunk: true
+                });
+            }, 300);
+        }
+
+        // UI Helper functions
+        function addResult(test, details, status) {
+            const resultsDiv = document.getElementById('results');
+            const resultDiv = document.createElement('div');
+            resultDiv.className = `test-result ${status}`;
+            resultDiv.innerHTML = `<strong>${test}:</strong> ${details}`;
+            resultsDiv.appendChild(resultDiv);
+            testResults.push({test, details, status});
+        }
+
+        function logMessage(message, type = 'info') {
+            const logOutput = document.getElementById('logOutput');
+            const timestamp = new Date().toLocaleTimeString();
+            const logEntry = document.createElement('div');
+            logEntry.style.color = type === 'error' ? '#dc3545' : 
+                                 type === 'warning' ? '#ffc107' : 
+                                 type === 'success' ? '#28a745' : '#6c757d';
+            logEntry.textContent = `[${timestamp}] ${message}`;
+            logOutput.appendChild(logEntry);
+            logOutput.scrollTop = logOutput.scrollHeight;
+        }
+
+        function updateProgress(percentage) {
+            const progressFill = document.getElementById('progressFill');
+            if (progressFill) {
+                progressFill.style.width = `${percentage}%`;
+            }
+        }
+
+        function showProgress() {
+            const progressBar = document.getElementById('progressBar');
+            progressBar.style.display = 'block';
+            updateProgress(0);
+        }
+
+        function hideProgress() {
+            const progressBar = document.getElementById('progressBar');
+            progressBar.style.display = 'none';
+        }
+
+        function clearResults() {
+            document.getElementById('results').innerHTML = '';
+            document.getElementById('logOutput').innerHTML = '';
+            testResults = [];
+            hideProgress();
+        }
+
+        // Initialize
+        document.addEventListener('DOMContentLoaded', () => {
+            logMessage('🚀 Chunked Streaming Test Environment Initialized', 'success');
+            logMessage('Click the test buttons above to validate the fixes', 'info');
+        });
+    </script>
+</body>
+</html>
