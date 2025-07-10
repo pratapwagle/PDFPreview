@@ -464,6 +464,18 @@
                     receivedChunks: 0,
                     transferMethod: 'Unknown'
                 };
+
+                // Timing tracking state
+                this.timingState = {
+                    startTime: null,
+                    endTime: null,
+                    currentOperation: 'Ready',
+                    operationDetails: 'Waiting for PDF load request',
+                    loadTimes: [],
+                    currentMethod: 'Unknown'
+                };
+
+                this.initializeTimingDisplay();
             }
 
             checkUWPEnvironment() {
@@ -489,6 +501,13 @@
                         case 'LOAD_PDF':
                             const transferMethod = message.transferMethod || 'Unknown';
                             console.log(`Loading PDF: ${message.fileName || 'Unknown'} (${message.urlType || 'unknown'} URL, Method: ${transferMethod})`);
+                            
+                            // Log additional details for virtual host URLs
+                            if (message.pdfUrl && message.pdfUrl.startsWith('https://localassets.web/')) {
+                                console.log('🌐 Virtual Host URL detected - using secure local file mapping');
+                                console.log(`Virtual URL: ${message.pdfUrl}`);
+                            }
+                            
                             this.loadPDF(message.pdfUrl, message.urlType, message.fileName, message.fileSize, transferMethod);
                             break;
                         case 'LOAD_PDF_CHUNKED_START':
@@ -538,6 +557,9 @@
                 try {
                     console.log(`Loading PDF from UWP: ${pdfUrl} (Type: ${urlType}, Method: ${transferMethod})`);
                     
+                    // Start timing for this operation
+                    this.startTiming('Loading PDF', transferMethod, `Loading ${fileName || 'PDF'} using ${transferMethod}`);
+                    
                     if (!pdfUrl) {
                         throw new Error('No PDF URL provided');
                     }
@@ -553,8 +575,11 @@
                     } else if (pdfUrl.startsWith('file:///')) {
                         // File URLs - works with cloud-hosted MFE (primary method)
                         await this.loadFileSystemPDF(pdfUrl, transferMethod);
+                    } else if (pdfUrl.startsWith('https://localassets.web/')) {
+                        // Virtual host mapping - modern secure approach
+                        await this.loadVirtualHostPDF(pdfUrl, transferMethod);
                     } else if (pdfUrl.startsWith('https://pdf-assets.uwp/')) {
-                        // Virtual host mapping (legacy support for local MFE)
+                        // Legacy virtual host mapping (backward compatibility)
                         await this.loadVirtualHostPDF(pdfUrl, transferMethod);
                     } else if (pdfUrl.startsWith('ms-appdata:///')) {
                         // Legacy ms-appdata URLs (backward compatibility)
@@ -566,8 +591,14 @@
                         throw new Error('Unsupported PDF URL format: ' + pdfUrl);
                     }
                     
+                    // Note: Timing is ended by individual loading methods when PDF is actually loaded
+                    
                 } catch (error) {
                     console.error('Error loading PDF:', error);
+                    
+                    // End timing on error
+                    this.endTiming(false, `Failed to load PDF: ${error.message}`);
+                    
                     this.sendMessageToUWP({
                         type: 'PDF_ERROR',
                         error: error.message,
@@ -622,45 +653,21 @@
                         
                         console.log('PDF loaded via custom stream with PDF.js');
                         await this.renderPDF(pdf);
-                        this.sendMessageToUWP({
-                            type: 'PDF_LOADED',
-                            message: `PDF loaded via custom stream with PDF.js successfully: ${fileName}`,
-                            method: 'pdfjs',
-                            urlType: urlType,
-                            fileName: fileName,
-                            fileSize: fileSize,
-                            pages: pdf.numPages,
-                            transferMethod: transferMethod
-                        });
+                        // Add a small delay to account for browser's final paint operations
+                        setTimeout(() => {
+                            this.onPDFLoaded('pdfjs', transferMethod);
+                        }, 100);
                         return;
                     } catch (pdfError) {
                         console.warn('PDF.js custom stream loading failed:', pdfError);
                         // Fallback to iframe
                         this.loadPDFInIframe(streamUrl, transferMethod);
-                        this.sendMessageToUWP({
-                            type: 'PDF_LOADED',
-                            message: `PDF loaded via custom stream with iframe fallback: ${fileName}`,
-                            method: 'iframe-fallback',
-                            urlType: urlType,
-                            fileName: fileName,
-                            fileSize: fileSize,
-                            transferMethod: transferMethod
-                        });
                         return;
                     }
                 }
                 
                 // Final fallback: Direct iframe
                 this.loadPDFInIframe(streamUrl, transferMethod);
-                this.sendMessageToUWP({
-                    type: 'PDF_LOADED',
-                    message: `PDF loaded via custom stream with iframe fallback: ${fileName}`,
-                    method: 'iframe',
-                    urlType: urlType,
-                    fileName: fileName,
-                    fileSize: fileSize,
-                    transferMethod: transferMethod
-                });
             }
 
             async loadFileSystemPDF(fileUrl, transferMethod = 'FileURL') {
@@ -737,13 +744,10 @@
                         
                         await this.renderPDF(pdf);
                         
-                        this.sendMessageToUWP({
-                            type: 'PDF_LOADED',
-                            message: 'PDF loaded successfully with PDF.js',
-                            pages: pdf.numPages,
-                            method: 'pdfjs',
-                            transferMethod: transferMethod
-                        });
+                        // Add a small delay to account for browser's final paint operations
+                        setTimeout(() => {
+                            this.onPDFLoaded('pdfjs', transferMethod);
+                        }, 100);
                         
                     } catch (fetchError) {
                         console.warn('PDF.js fetch failed, falling back to iframe:', fetchError);
@@ -756,18 +760,68 @@
             }
 
             async loadVirtualHostPDF(virtualUrl, transferMethod = 'VirtualHost') {
-                // Legacy support for virtual host mapping and ms-appdata URLs
-                console.log(`Loading PDF from virtual host/ms-appdata: ${virtualUrl} (Method: ${transferMethod})`);
-                this.loadPDFInIframe(virtualUrl, transferMethod);
+                console.log(`Loading PDF from virtual host: ${virtualUrl} (Method: ${transferMethod})`);
                 
-                // Notify UWP of the attempt
+                // First, check if virtual host mapping is ready
+                const hostReady = await this.checkVirtualHostReadiness();
+                if (!hostReady.ready) {
+                    console.error('Virtual host mapping not ready:', hostReady.reason);
+                    this.showVirtualHostErrorMessage(virtualUrl, hostReady.reason);
+                    this.onPDFError('virtual-host-check', transferMethod);
+                    return;
+                }
+                
+                // Notify UWP that we're starting to load from virtual host
                 this.sendMessageToUWP({
                     type: 'PDF_LOADING',
-                    message: 'Loading PDF from virtual host',
+                    message: 'Loading PDF from virtual host mapping',
                     url: virtualUrl,
                     method: 'virtual-host',
                     transferMethod: transferMethod
                 });
+                
+                // Virtual host URLs should be treated like regular HTTPS URLs
+                // since they're mapped by WebView2's SetVirtualHostNameToFolderMapping
+                
+                // Method 1: Direct iframe (recommended for virtual hosts)
+                if (this.useIframeMethod()) {
+                    console.log('Loading virtual host PDF in iframe...');
+                    this.loadPDFInIframe(virtualUrl, transferMethod);
+                    return;
+                }
+                
+                // Method 2: PDF.js with fetch (also works with virtual hosts)
+                if (window.pdfjsLib) {
+                    try {
+                        console.log('Attempting to load virtual host PDF with PDF.js...');
+                        
+                        const response = await fetch(virtualUrl);
+                        if (!response.ok) {
+                            throw new Error(`Virtual host fetch error! status: ${response.status}`);
+                        }
+                        
+                        const arrayBuffer = await response.arrayBuffer();
+                        const loadingTask = window.pdfjsLib.getDocument(new Uint8Array(arrayBuffer));
+                        const pdf = await loadingTask.promise;
+                        
+                        console.log('PDF loaded via virtual host with PDF.js');
+                        await this.renderPDF(pdf);
+                        
+                        // Add a small delay to account for browser's final paint operations
+                        setTimeout(() => {
+                            this.onPDFLoaded('pdfjs', transferMethod);
+                        }, 100); // Small delay to ensure rendering is truly complete
+                        return;
+                    } catch (pdfError) {
+                        console.warn('PDF.js virtual host loading failed:', pdfError);
+                        // Fallback to iframe
+                        this.loadPDFInIframe(virtualUrl, transferMethod);
+                        return;
+                    }
+                }
+                
+                // Final fallback: Direct iframe
+                this.loadPDFInIframe(virtualUrl, transferMethod);
             }
 
             async loadDataUrlPDF(dataUrl, transferMethod = 'DataURL') {
@@ -778,12 +832,7 @@
                 // Validate data URL format
                 if (!dataUrl.startsWith('data:application/pdf;base64,')) {
                     console.error('Invalid data URL format');
-                    this.sendMessageToUWP({
-                        type: 'PDF_ERROR',
-                        error: 'Invalid data URL format',
-                        method: 'data-validation',
-                        transferMethod: transferMethod
-                    });
+                    this.onPDFError('data-validation', transferMethod);
                     return;
                 }
                 
@@ -796,13 +845,7 @@
                         console.log(`PDF loaded successfully: ${pdf.numPages} pages`);
                         await this.renderPDF(pdf);
                         
-                        this.sendMessageToUWP({
-                            type: 'PDF_LOADED',
-                            message: 'PDF loaded from data URL',
-                            pages: pdf.numPages,
-                            method: 'pdfjs-dataurl',
-                            transferMethod: transferMethod
-                        });
+                        this.onPDFLoaded('pdfjs-dataurl', transferMethod);
                     } catch (error) {
                         console.warn('PDF.js data URL failed:', error);
                         console.log('Falling back to iframe method...');
@@ -815,11 +858,11 @@
                             transferMethod: transferMethod
                         });
                         
-                        this.loadPDFDataUrlInIframe(dataUrl, transferMethod);
+                        this.loadPDFInIframe(dataUrl, transferMethod);
                     }
                 } else {
                     console.log('PDF.js not available, using iframe method');
-                    this.loadPDFDataUrlInIframe(dataUrl, transferMethod);
+                    this.loadPDFInIframe(dataUrl, transferMethod);
                 }
             }
 
@@ -858,10 +901,16 @@
                     iframe.className = 'pdf-frame';
                     iframe.title = 'PDF Preview';
                     
+                    // Track if iframe has loaded successfully to avoid false error detection
+                    let iframeLoadedSuccessfully = false;
+                    
                     // Set up load/error handlers
                     iframe.onload = () => {
                         console.log('Iframe loaded successfully');
-                        this.onPDFLoaded('iframe', transferMethod);
+                        iframeLoadedSuccessfully = true;
+                        
+                        // For PDF iframes, implement smart timing that accounts for PDF rendering
+                        this.waitForPDFToRender(iframe, transferMethod);
                     };
                     
                     iframe.onerror = (error) => {
@@ -872,6 +921,9 @@
                         } else if (pdfUrl.startsWith('uwp-pdf://')) {
                             this.showStreamErrorMessage(pdfUrl);
                             this.onPDFError('stream-not-supported', transferMethod);
+                        } else if (pdfUrl.startsWith('https://localassets.web/')) {
+                            this.showVirtualHostErrorMessage(pdfUrl);
+                            this.onPDFError('virtual-host-not-mapped', transferMethod);
                         } else {
                             this.onPDFError('iframe-load-error', transferMethod);
                         }
@@ -887,10 +939,18 @@
                     `;
                     container.appendChild(iframe);
                     
-                    // Additional error detection for specific URL types
+                    // Additional error detection for specific URL types (only if iframe doesn't load)
                     setTimeout(() => {
+                        // Skip this check if iframe already loaded successfully
+                        if (iframeLoadedSuccessfully) {
+                            console.log('Iframe loaded successfully, skipping error detection check');
+                            return;
+                        }
+                        
                         try {
                             // Try to access iframe content to detect security errors
+                            // Note: For virtual host URLs, contentDocument will be null due to cross-origin,
+                            // but this doesn't mean the mapping failed if iframe.onload was called
                             if (iframe.contentDocument === null) {
                                 if (pdfUrl.startsWith('file:///')) {
                                     console.error('File URL access blocked by browser security');
@@ -909,6 +969,18 @@
                                         method: 'iframe',
                                         transferMethod: transferMethod,
                                         solution: 'Register uwp-pdf:// scheme handler in UWP application'
+                                    });
+                                } else if (pdfUrl.startsWith('https://localassets.web/')) {
+                                    // For virtual host URLs, contentDocument being null is expected due to cross-origin
+                                    // Only report error if onload event hasn't fired
+                                    console.error('Virtual host mapping not configured in UWP WebView2 (no onload event fired)');
+                                    this.showVirtualHostErrorMessage(pdfUrl);
+                                    this.sendMessageToUWP({
+                                        type: 'PDF_ERROR',
+                                        error: 'Virtual host mapping not configured: ' + pdfUrl,
+                                        method: 'iframe',
+                                        transferMethod: transferMethod,
+                                        solution: 'Configure SetVirtualHostNameToFolderMapping in UWP application'
                                     });
                                 }
                             }
@@ -930,6 +1002,16 @@
                                     method: 'iframe',
                                     transferMethod: transferMethod,
                                     solution: 'Register uwp-pdf:// scheme handler in UWP application'
+                                });
+                            } else if (pdfUrl.startsWith('https://localassets.web/')) {
+                                console.error('Virtual host mapping error:', securityError);
+                                this.showVirtualHostErrorMessage(pdfUrl);
+                                this.sendMessageToUWP({
+                                    type: 'PDF_ERROR',
+                                    error: 'Virtual host mapping failed: ' + securityError.message,
+                                    method: 'iframe',
+                                    transferMethod: transferMethod,
+                                    solution: 'Configure SetVirtualHostNameToFolderMapping in UWP application'
                                 });
                             }
                         }
@@ -963,7 +1045,7 @@
                             <div style="background: #e8f5e8; border: 1px solid #4caf50; border-radius: 8px; padding: 15px; margin: 20px 0;">
                                 <h4 style="margin-top: 0; color: #2e7d32;">📋 Quick Test:</h4>
                                 <p style="margin: 5px 0;">1. Try "Test Data URL PDF" button - works immediately</p>
-                                <p style="margin: 5px 0;">2. Try "Test File URL PDF" - works in UWP with permissions</p>
+                                <p style="margin: 5px 0;">2. Try "Test File URL" - works in UWP with permissions</p>
                                 <p style="margin: 5px 0;">3. See <code>CUSTOM-STREAM-QUICK-FIX.md</code> for implementation</p>
                             </div>
                         </div>
@@ -1001,33 +1083,47 @@
                 showStatus('File URL blocked by browser security - see solutions above', 'error');
             }
 
-            loadPDFDataUrlInIframe(dataUrl, transferMethod = 'DataURL') {
-                console.log(`Loading PDF data URL in iframe... (Method: ${transferMethod})`);
-                
-                // Convert data URL to blob for iframe (more reliable)
-                fetch(dataUrl)
-                    .then(response => response.blob())
-                    .then(blob => {
-                        const blobUrl = URL.createObjectURL(blob);
-                        const container = document.getElementById('pdfContainer');
-                        
-                        if (container) {
-                            container.innerHTML = `
-                                <iframe 
-                                    src="${blobUrl}" 
-                                    class="pdf-frame"
-                                    title="PDF Preview"
-                                    style="border: none; width: 100%; height: 70vh;"
-                                    onload="window.uwpPDFIntegration.onPDFLoaded('iframe-blob', '${transferMethod}')"
-                                    onerror="window.uwpPDFIntegration.onPDFError('iframe-blob', '${transferMethod}')">
-                                </iframe>
-                            `;
-                        }
-                    })
-                    .catch(error => {
-                        console.error('Error creating blob URL:', error);
-                        this.onPDFError('blob-creation', transferMethod);
-                    });
+            showVirtualHostErrorMessage(virtualUrl) {
+                const container = document.getElementById('pdfContainer');
+                if (container) {
+                    container.innerHTML = `
+                        <div class="placeholder" style="text-align: center; padding: 40px;">
+                            <div class="placeholder-icon" style="font-size: 4em; margin-bottom: 20px;">🌐</div>
+                            <h3 style="color: #f57c00; margin-bottom: 15px;">Virtual Host Mapping Not Configured</h3>
+                            <p style="margin-bottom: 15px;"><strong>Virtual URL:</strong> <code style="background: #f5f5f5; padding: 2px 4px; border-radius: 3px;">${virtualUrl}</code></p>
+                            <p style="margin-bottom: 20px; color: #d32f2f;"><strong>Error:</strong> Virtual host "localassets.web" is not mapped to the local folder</p>
+                            
+                            <div style="background: #fff3cd; border: 1px solid #ffeaa7; border-radius: 8px; padding: 20px; margin: 20px 0; text-align: left;">
+                                <h4 style="margin-top: 0; color: #856404;">🔧 UWP Fix Required:</h4>
+                                <p style="margin-bottom: 10px;">Add this code to your UWP WebView2 initialization:</p>
+                                <pre style="background: #f8f9fa; padding: 10px; border-radius: 4px; overflow-x: auto; font-size: 0.9em;"><code>string localFolderPath = ApplicationData.Current.LocalFolder.Path;
+webView.CoreWebView2.SetVirtualHostNameToFolderMapping(
+    "localassets.web",
+    localFolderPath,
+    CoreWebView2HostResourceAccessKind.Allow
+);</code></pre>
+                            </div>
+                            
+                            <div style="background: #e8f5e8; border: 1px solid #4caf50; border-radius: 8px; padding: 15px; margin: 20px 0;">
+                                <h4 style="margin-top: 0; color: #2e7d32;">✅ Benefits of Virtual Host Mapping:</h4>
+                                <ul style="text-align: left; margin: 5px 0; padding-left: 20px;">
+                                    <li>More secure than file:// URLs</li>
+                                    <li>No browser arguments required</li>
+                                    <li>Works with modern WebView2 versions</li>
+                                    <li>Direct file access without Base64 encoding</li>
+                                </ul>
+                            </div>
+                            
+                            <div style="background: #f3e5f5; border: 1px solid #9c27b0; border-radius: 8px; padding: 15px; margin: 20px 0;">
+                                <h4 style="margin-top: 0; color: #7b1fa2;">🔄 Alternative Methods:</h4>
+                                <p style="margin: 5px 0;">1. <strong>DataURL Method:</strong> Works immediately, higher memory usage</p>
+                                <p style="margin: 5px 0;">2. <strong>CustomStream Method:</strong> Best performance, requires custom handler</p>
+                                <p style="margin: 5px 0;">3. <strong>FileURL Method:</strong> Requires browser arguments or registry config</p>
+                            </div>
+                        </div>
+                    `;
+                }
+                showStatus('Virtual host mapping not configured - see setup guide above', 'error');
             }
 
             async renderPDF(pdf) {
@@ -1153,6 +1249,9 @@
                 console.log(`PDF loaded successfully using ${method} method (${transferMethod})`);
                 showStatus('PDF loaded successfully from UWP storage!', 'success');
                 
+                // End timing when PDF is actually loaded
+                this.endTiming(true, `Successfully loaded PDF using ${method} method (${transferMethod})`);
+                
                 this.sendMessageToUWP({
                     type: 'PDF_LOADED',
                     message: `PDF loaded in ${method} successfully`,
@@ -1164,6 +1263,9 @@
             onPDFError(method = 'unknown', transferMethod = 'Unknown') {
                 console.error(`Failed to load PDF using ${method} method (${transferMethod})`);
                 showStatus('Failed to load PDF from UWP storage', 'error');
+                
+                // End timing when PDF loading fails
+                this.endTiming(false, `Failed to load PDF using ${method} method (${transferMethod})`);
                 
                 this.sendMessageToUWP({
                     type: 'PDF_ERROR',
@@ -1201,6 +1303,9 @@
             startChunkedPDFLoad(message) {
                 const transferMethod = message.transferMethod || 'ChunkedStream';
                 console.log(`Starting chunked PDF load: ${message.fileName} (${message.totalChunks} chunks, ${message.totalSize} bytes, Method: ${transferMethod})`);
+                
+                // Start timing for chunked loading
+                this.startTiming('Loading Chunked PDF', transferMethod, `Loading ${message.fileName} in ${message.totalChunks} chunks`);
                 
                 // Show loading state with progress
                 this.showChunkedLoadingState(message.fileName, message.totalChunks);
@@ -1379,10 +1484,17 @@
                         fileName: fileName,
                         transferMethod: transferMethod
                     });
+
+                    // End timing on successful completion
+                    this.endTiming(true, `Successfully assembled and loaded ${fileName} from ${expectedChunks} chunks`);
                     
                 } catch (error) {
                     console.error('💥 Error assembling chunked PDF:', error);
                     const transferMethod = this.chunkingState.transferMethod || 'ChunkedStream';
+                    
+                    // End timing on error
+                    this.endTiming(false, `Failed to assemble chunked PDF: ${error.message}`);
+                    
                     this.resetChunkingState();
                     this.sendMessageToUWP({
                         type: 'PDF_ERROR',
@@ -1397,7 +1509,7 @@
             showChunkedLoadingState(fileName, totalChunks) {
                 const container = document.getElementById('pdfContainer');
                 if (container) {
-                    // Reset container to default styling for loading state
+                    // Reset container to default styling
                     container.style.cssText = `
                         padding: 20px;
                         min-height: 400px;
@@ -1451,6 +1563,137 @@
                 };
             }
 
+            // === Timing Methods ===
+
+            initializeTimingDisplay() {
+                // Show timing section
+                const timingSection = document.getElementById('timingSection');
+                if (timingSection) {
+                    timingSection.style.display = 'block';
+                    this.updateTimingDisplay();
+                }
+            }
+
+            startTiming(operation, method = 'Unknown', details = '') {
+                this.timingState.startTime = performance.now();
+                this.timingState.currentOperation = operation;
+                this.timingState.currentMethod = method;
+                this.timingState.operationDetails = details || `Loading PDF using ${method}`;
+                
+                console.log(`⏱️ Started timing: ${operation} (${method})`);
+                this.updateTimingDisplay();
+            }
+
+            endTiming(success = true, additionalDetails = '') {
+                if (!this.timingState.startTime) {
+                    console.warn('endTiming called without startTiming');
+                    return;
+                }
+
+                this.timingState.endTime = performance.now();
+                const duration = this.timingState.endTime - this.timingState.startTime;
+                
+                // Add to load times array
+                this.timingState.loadTimes.push({
+                    duration: duration,
+                    method: this.timingState.currentMethod,
+                    success: success,
+                    timestamp: new Date().toISOString()
+                });
+
+                // Keep only last 10 load times
+                if (this.timingState.loadTimes.length > 10) {
+                    this.timingState.loadTimes = this.timingState.loadTimes.slice(-10);
+                }
+
+                const status = success ? 'Completed' : 'Failed';
+                this.timingState.currentOperation = status;
+                this.timingState.operationDetails = additionalDetails || 
+                    `${status} in ${this.formatDuration(duration)} using ${this.timingState.currentMethod}`;
+
+                console.log(`⏱️ Ended timing: ${status} - ${this.formatDuration(duration)} (${this.timingState.currentMethod})`);
+                this.updateTimingDisplay();
+
+                // Reset timing after a delay
+                setTimeout(() => {
+                    this.timingState.currentOperation = 'Ready';
+                    this.timingState.operationDetails = 'Waiting for PDF load request';
+                    this.updateTimingDisplay();
+                }, 3000);
+            }
+
+            updateTimingDisplay() {
+                // Update current operation
+                const operationStatus = document.getElementById('operationStatus');
+                const operationDetails = document.getElementById('operationDetails');
+                const currentOperation = document.getElementById('currentOperation');
+
+                if (operationStatus) operationStatus.textContent = this.timingState.currentOperation;
+                if (operationDetails) operationDetails.textContent = this.timingState.operationDetails;
+                
+                // Update operation status styling
+                if (currentOperation) {
+                    currentOperation.className = 'timing-item';
+                    if (this.timingState.currentOperation === 'Loading' || this.timingState.currentOperation.includes('Loading')) {
+                        currentOperation.classList.add('loading');
+                    } else if (this.timingState.currentOperation === 'Completed') {
+                        currentOperation.classList.add('success');
+                    } else if (this.timingState.currentOperation === 'Failed') {
+                        currentOperation.classList.add('error');
+                    }
+                }
+
+                // Update last timing
+                if (this.timingState.loadTimes.length > 0) {
+                    const lastLoad = this.timingState.loadTimes[this.timingState.loadTimes.length - 1];
+                    const lastDuration = document.getElementById('lastDuration');
+                    const lastMethod = document.getElementById('lastMethod');
+                    const lastTiming = document.getElementById('lastTiming');
+
+                    if (lastDuration) lastDuration.textContent = this.formatDuration(lastLoad.duration);
+                    if (lastMethod) lastMethod.textContent = `${lastLoad.method} - ${lastLoad.success ? 'Success' : 'Failed'}`;
+                    
+                    if (lastTiming) {
+                        lastTiming.className = 'timing-item';
+                        if (lastLoad.success) {
+                            lastTiming.classList.add('success');
+                        } else {
+                            lastTiming.classList.add('error');
+                        }
+                    }
+                }
+
+                // Update average timing
+                if (this.timingState.loadTimes.length > 0) {
+                    const successfulLoads = this.timingState.loadTimes.filter(load => load.success);
+                    if (successfulLoads.length > 0) {
+                        const avgDuration = successfulLoads.reduce((sum, load) => sum + load.duration, 0) / successfulLoads.length;
+                        const avgDurationEl = document.getElementById('avgDuration');
+                        const totalLoadsEl = document.getElementById('totalLoads');
+                        const averageTiming = document.getElementById('averageTiming');
+
+                        if (avgDurationEl) avgDurationEl.textContent = this.formatDuration(avgDuration);
+                        if (totalLoadsEl) totalLoadsEl.textContent = `${successfulLoads.length} successful loads`;
+                        
+                        if (averageTiming) {
+                            averageTiming.className = 'timing-item success';
+                        }
+                    }
+                }
+            }
+
+            formatDuration(milliseconds) {
+                if (milliseconds < 1000) {
+                    return `${Math.round(milliseconds)}ms`;
+                } else if (milliseconds < 60000) {
+                    return `${(milliseconds / 1000).toFixed(1)}s`;
+                } else {
+                    const minutes = Math.floor(milliseconds / 60000);
+                    const seconds = ((milliseconds % 60000) / 1000).toFixed(1);
+                    return `${minutes}m ${seconds}s`;
+                }
+            }
+
             sendMessageToUWP(message) {
                 if (this.isInUWP) {
                     console.log('Sending message to UWP:', message);
@@ -1468,6 +1711,112 @@
                         });
                         console.log('Notified UWP that MFE is ready');
                     }, 1000);
+                }
+            }
+
+            async checkVirtualHostReadiness() {
+                console.log('🔍 Checking virtual host readiness...');
+                
+                // Check if virtual host readiness flags are set by UWP
+                if (typeof window.virtualHostReady !== 'undefined') {
+                    if (window.virtualHostReady === true) {
+                        console.log('✅ Virtual host confirmed ready by UWP');
+                        return { ready: true, reason: 'UWP confirmed ready' };
+                    } else if (window.virtualHostUnsupported === true) {
+                        console.log('❌ Virtual host unsupported by WebView2 version');
+                        return { ready: false, reason: 'WebView2 version does not support virtual host mapping' };
+                    } else if (window.virtualHostFailed === true) {
+                        console.log('❌ Virtual host setup failed in UWP');
+                        return { ready: false, reason: 'Virtual host mapping setup failed after multiple attempts' };
+                    } else {
+                        console.log('⚠️ Virtual host readiness flag set to false');
+                        return { ready: false, reason: 'Virtual host mapping not ready yet' };
+                    }
+                }
+                
+                // If no flags are set, perform a manual test
+                console.log('🧪 No readiness flags found, performing manual virtual host test...');
+                
+                try {
+                    // Test by fetching a known test file if it exists
+                    const testUrl = 'https://localassets.web/virtualhost_verify.txt';
+                    const response = await Promise.race([
+                        fetch(testUrl),
+                        new Promise((_, reject) => setTimeout(() => reject(new Error('Timeout')), 3000))
+                    ]);
+                    
+                    if (response.ok) {
+                        console.log('✅ Virtual host test successful');
+                        return { ready: true, reason: 'Manual test successful' };
+                    } else {
+                        console.log(`⚠️ Virtual host test failed with status: ${response.status}`);
+                        return { ready: false, reason: `Test fetch failed: ${response.status}` };
+                    }
+                } catch (error) {
+                    console.log(`❌ Virtual host test error: ${error.message}`);
+                    
+                    // Common error patterns that indicate virtual host is not set up
+                    if (error.message.includes('Failed to fetch') || 
+                        error.message.includes('NetworkError') ||
+                        error.message.includes('ERR_NAME_NOT_RESOLVED') ||
+                        error.message.includes('Timeout')) {
+                        return { ready: false, reason: 'Virtual host mapping not configured or accessible' };
+                    }
+                    
+                    return { ready: false, reason: `Test error: ${error.message}` };
+                }
+            }
+
+            waitForPDFToRender(iframe, transferMethod, attempt = 1, maxAttempts = 20) {
+                // Smart detection for when PDF content is actually rendered in iframe
+                // This provides more accurate timing that reflects the actual user experience
+                
+                const checkInterval = 150; // Check every 150ms
+                const maxWaitTime = maxAttempts * checkInterval; // Max 3 seconds total
+                
+                console.log(`⏱️ Checking PDF render status (attempt ${attempt}/${maxAttempts})...`);
+                
+                try {
+                    // For PDFs in iframes, we can't always access the content due to cross-origin restrictions
+                    // But we can use a combination of timing and heuristics
+                    
+                    // Method 1: Check if iframe has reasonable dimensions (indicates content loaded)
+                    const hasValidDimensions = iframe.offsetHeight > 100 && iframe.offsetWidth > 100;
+                    
+                    // Method 2: For virtual host, assume rendering is complete after a minimum wait time
+                    const minWaitTime = 800; // Minimum 800ms for realistic PDF loading
+                    const actualWaitTime = attempt * checkInterval;
+                    const hasWaitedMinimum = actualWaitTime >= minWaitTime;
+                    
+                    if (hasValidDimensions && hasWaitedMinimum) {
+                        console.log(`✅ PDF appears to be rendered (waited ${actualWaitTime}ms)`);
+                        this.onPDFLoaded('iframe', transferMethod);
+                        return;
+                    }
+                    
+                    // Method 3: If we've waited long enough, assume it's ready
+                    if (attempt >= maxAttempts) {
+                        console.log(`⏰ Max wait time reached (${maxWaitTime}ms), assuming PDF is ready`);
+                        this.onPDFLoaded('iframe', transferMethod);
+                        return;
+                    }
+                    
+                    // Continue checking
+                    setTimeout(() => {
+                        this.waitForPDFToRender(iframe, transferMethod, attempt + 1, maxAttempts);
+                    }, checkInterval);
+                    
+                } catch (error) {
+                    console.warn(`Error checking PDF render status: ${error.message}`);
+                    // Fall back to timing assumption
+                    if (attempt >= 5) { // At least 750ms
+                        console.log(`⏰ Falling back to timing assumption after error`);
+                        this.onPDFLoaded('iframe', transferMethod);
+                    } else {
+                        setTimeout(() => {
+                            this.waitForPDFToRender(iframe, transferMethod, attempt + 1, maxAttempts);
+                        }, checkInterval);
+                    }
                 }
             }
         }
@@ -1661,44 +2010,205 @@
                 return;
             }
 
+            // Start timing for file selection preview
+            if (window.uwpPDFIntegration) {
+                window.uwpPDFIntegration.startTiming('Loading Selected File', 'File Selection', `Loading ${currentFile.name}`);
+            }
+
             previewBtn.disabled = true;
             selectFileBtn.disabled = true;
             previewBtn.textContent = 'Loading...';
             showLoading();
 
             try {
-                // Create object URL for the selected file
+                // Method 1: Try PDF.js first for better compatibility
+                if (window.pdfjsLib) {
+                    console.log('Using PDF.js to render selected file');
+                    const arrayBuffer = await currentFile.arrayBuffer();
+                    const loadingTask = window.pdfjsLib.getDocument(new Uint8Array(arrayBuffer));
+                    const pdf = await loadingTask.promise;
+                    
+                    console.log(`PDF loaded with PDF.js: ${pdf.numPages} pages`);
+                    await renderPDFWithPDFJS(pdf);
+                    
+                    showStatus('PDF loaded successfully with PDF.js!', 'success');
+                    notifyUWP('pdfLoaded', 'PDF loaded successfully with PDF.js', { 
+                        fileName: currentFile.name,
+                        fileSize: currentFile.size,
+                        pages: pdf.numPages,
+                        method: 'pdfjs-fileSelection',
+                        loadTime: new Date().toISOString()
+                    });
+
+                    // End timing on PDF.js success
+                    if (window.uwpPDFIntegration) {
+                        window.uwpPDFIntegration.endTiming(true, `Successfully loaded ${currentFile.name} with PDF.js (${pdf.numPages} pages)`);
+                    }
+                    return;
+                }
+
+                // Method 2: Fallback to iframe with object URL
+                console.log('PDF.js not available, using iframe with object URL');
                 const fileUrl = URL.createObjectURL(currentFile);
                 console.log('Created file URL:', fileUrl);
                 
-                pdfContainer.innerHTML = `
-                    <iframe 
-                        src="${fileUrl}" 
-                        class="pdf-frame"
-                        title="PDF Preview"
-                        onload="console.log('PDF iframe loaded successfully')"
-                        onerror="console.error('PDF iframe failed to load')"
-                    ></iframe>
+                // Create iframe with better error handling
+                const iframe = document.createElement('iframe');
+                iframe.src = fileUrl;
+                iframe.className = 'pdf-frame';
+                iframe.title = 'PDF Preview';
+                iframe.style.cssText = `
+                    width: 100%;
+                    height: 70vh;
+                    border: none;
+                    border-radius: 8px;
+                    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.1);
+                    background: white;
                 `;
+                
+                // Set up load and error handlers
+                iframe.onload = () => {
+                    console.log('PDF iframe loaded successfully');
+                    showStatus('PDF loaded successfully!', 'success');
+                    notifyUWP('pdfLoaded', 'PDF loaded successfully with iframe', { 
+                        fileName: currentFile.name,
+                        fileSize: currentFile.size,
+                        method: 'iframe-fileSelection',
+                        loadTime: new Date().toISOString()
+                    });
 
-                showStatus('PDF loaded successfully!', 'success');
-                notifyUWP('pdfLoaded', 'PDF loaded successfully', { 
-                    fileName: currentFile.name,
-                    fileSize: currentFile.size,
-                    method: 'fileSelection',
-                    loadTime: new Date().toISOString()
+                    // End timing on iframe success
+                    if (window.uwpPDFIntegration) {
+                        window.uwpPDFIntegration.endTiming(true, `Successfully loaded ${currentFile.name} with iframe`);
+                    }
+                };
+                
+                iframe.onerror = (error) => {
+                    console.error('PDF iframe failed to load:', error);
+                    showStatus('Failed to load PDF in iframe', 'error');
+                    notifyUWP('error', 'Failed to load PDF iframe', { error: error.message });
+                    showPlaceholder();
+
+                    // End timing on iframe error
+                    if (window.uwpPDFIntegration) {
+                        window.uwpPDFIntegration.endTiming(false, `Failed to load ${currentFile.name} in iframe`);
+                    }
+                };
+                
+                // Set up container and add iframe
+                pdfContainer.style.cssText = `
+                    padding: 0;
+                    background: #525659;
+                    display: block;
+                    width: 100%;
+                    min-height: 70vh;
+                `;
+                pdfContainer.innerHTML = '';
+                pdfContainer.appendChild(iframe);
+
+                // Clean up object URL after iframe loads
+                iframe.addEventListener('load', () => {
+                    setTimeout(() => URL.revokeObjectURL(fileUrl), 1000);
                 });
 
             } catch (error) {
-                console.error('Error:', error);
+                console.error('Error loading PDF:', error);
                 showStatus('Failed to load PDF file', 'error');
                 notifyUWP('error', 'Failed to load PDF file', { error: error.message });
                 showPlaceholder();
+
+                // End timing on catch error
+                if (window.uwpPDFIntegration) {
+                    window.uwpPDFIntegration.endTiming(false, `Failed to load ${currentFile?.name || 'file'}: ${error.message}`);
+                }
             } finally {
                 previewBtn.disabled = false;
                 selectFileBtn.disabled = false;
                 previewBtn.textContent = 'Preview PDF';
             }
+        }
+
+        // Helper function to render PDF with PDF.js
+        async function renderPDFWithPDFJS(pdf) {
+            const container = document.getElementById('pdfContainer');
+            if (!container) return;
+
+            // Reset container styling for PDF.js rendering
+            container.style.cssText = `
+                padding: 20px;
+                background: #525659;
+                display: block;
+                width: 100%;
+                min-height: 70vh;
+                overflow-y: auto;
+            `;
+
+            // Create scrollable container for PDF pages
+            container.innerHTML = `
+                <div style="
+                    width: 100%; 
+                    overflow-y: auto; 
+                    background: #525659;
+                    padding: 20px;
+                    box-sizing: border-box;
+                    display: flex;
+                    flex-direction: column;
+                    align-items: center;
+                    gap: 10px;
+                " id="pdfPages">
+                    <div style="color: white; margin-bottom: 10px;">Loading ${pdf.numPages} pages...</div>
+                </div>
+            `;
+
+            const pagesContainer = document.getElementById('pdfPages');
+            const containerWidth = pagesContainer.clientWidth - 40; // Account for padding
+            
+            // Render each page
+            for (let pageNum = 1; pageNum <= pdf.numPages; pageNum++) {
+                const page = await pdf.getPage(pageNum);
+                const viewport = page.getViewport({ scale: 1.0 });
+                const scale = Math.min(containerWidth / viewport.width, 2.0);
+                const scaledViewport = page.getViewport({ scale: scale });
+                
+                // Create canvas for this page
+                const canvas = document.createElement('canvas');
+                const context = canvas.getContext('2d');
+                canvas.height = scaledViewport.height;
+                canvas.width = scaledViewport.width;
+                
+                canvas.style.cssText = `
+                    display: block;
+                    margin: 0 auto 10px auto;
+                    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.3);
+                    border: 1px solid #ccc;
+                    background: white;
+                    max-width: 100%;
+                `;
+                
+                pagesContainer.appendChild(canvas);
+                
+                // Render the page
+                await page.render({
+                    canvasContext: context,
+                    viewport: scaledViewport
+                }).promise;
+                
+                // Update loading message
+                if (pageNum === 1) {
+                    const loadingMsg = pagesContainer.querySelector('div');
+                    if (loadingMsg) {
+                        loadingMsg.textContent = `Rendering pages... (${pageNum}/${pdf.numPages})`;
+                    }
+                }
+            }
+            
+            // Remove loading message when done
+            const loadingMsg = pagesContainer.querySelector('div');
+            if (loadingMsg && loadingMsg.textContent.includes('Loading')) {
+                loadingMsg.remove();
+            }
+            
+            console.log(`Successfully rendered ${pdf.numPages} pages with PDF.js`);
         }
 
         async function previewPDF() {
@@ -1729,71 +2239,51 @@
             showLoading();
 
             try {
-                // First validate the file
-                const response = await fetch('/api/validate', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json'
-                    },
-                    body: JSON.stringify({ filePath })
-                });
-
-                const result = await response.json();
-
-                if (!response.ok) {
-                    throw new Error(result.error || 'Failed to validate file');
-                }
-
-                // If validation successful, show the PDF
-                // Properly encode the file path for URL
-                const encodedPath = encodeURIComponent(filePath);
-                const pdfUrl = `/api/pdf/${encodedPath}`;
+                // For file paths, try to load directly as file URL
+                // Note: This only works in certain environments or with special browser settings
+                const fileUrl = filePath.startsWith('file://') ? filePath : `file:///${filePath.replace(/\\/g, '/')}`;
+                console.log('Constructed file URL:', fileUrl);
                 
-                console.log('Original file path:', filePath);
-                console.log('Encoded path:', encodedPath);
-                console.log('Final PDF URL:', pdfUrl);
-                
+                // Create iframe to load the PDF
                 pdfContainer.innerHTML = `
                     <iframe 
-                        src="${pdfUrl}" 
+                        src="${fileUrl}" 
                         class="pdf-frame"
                         title="PDF Preview"
+                        onload="console.log('PDF iframe loaded successfully'); showStatus('PDF loaded successfully!', 'success');"
+                        onerror="console.error('PDF iframe failed to load'); showStatus('Failed to load PDF. File URLs may be blocked by browser security.', 'error');"
                     ></iframe>
                 `;
 
-                showStatus('PDF loaded successfully!', 'success');
-                notifyUWP('pdfLoaded', 'PDF loaded successfully', { 
+                showStatus('PDF loading...', 'loading');
+                notifyUWP('pdfLoading', 'PDF loading from file path', { 
                     filePath: filePath,
+                    fileUrl: fileUrl,
                     method: 'filePath',
                     loadTime: new Date().toISOString()
                 });
 
+                // Set a timeout to detect if the iframe didn't load
+                setTimeout(() => {
+                    const iframe = pdfContainer.querySelector('iframe');
+                    if (iframe) {
+                        try {
+                            // Check if iframe loaded content
+                            if (iframe.contentDocument === null) {
+                                showStatus('⚠️ File URL may be blocked by browser security. Try selecting a file instead.', 'error');
+                                console.warn('File URL access blocked - iframe contentDocument is null');
+                            }
+                        } catch (securityError) {
+                            console.warn('Security error accessing iframe:', securityError.message);
+                            showStatus('✅ PDF loaded (security restrictions prevent verification)', 'success');
+                        }
+                    }
+                }, 2000);
+
             } catch (error) {
-                console.error('Error in previewPDF:', error);
-                let errorMessage = error.message;
-                
-                // Provide more specific error messages
-                if (error.message.includes('404') || error.message.includes('File not found')) {
-                    errorMessage = `File not found: "${filePath}". Please check that the file exists and the path is correct.`;
-                } else if (error.message.includes('400') || error.message.includes('not a PDF')) {
-                    errorMessage = `The file "${filePath}" is not a valid PDF file.`;
-                } else if (error.message.includes('Failed to fetch')) {
-                    errorMessage = `Network error: Could not connect to server. Please ensure the server is running.`;
-                }
-                
-                console.error('Detailed error for UWP:', {
-                    originalError: error.message,
-                    filePath: filePath,
-                    encodedPath: encodeURIComponent(filePath),
-                    userAgent: navigator.userAgent
-                });
-                
-                showStatus(errorMessage, 'error');
-                notifyUWP('error', errorMessage, { 
-                    filePath: filePath,
-                    originalError: error.message,
-                    encodedPath: encodeURIComponent(filePath)
-                });
+                console.error('Error loading PDF from file path:', error);
+                showStatus('Failed to load PDF from file path', 'error');
+                notifyUWP('error', 'Failed to load PDF from file path', { error: error.message });
                 showPlaceholder();
             } finally {
                 previewBtn.disabled = false;

@@ -10,6 +10,7 @@ using Microsoft.UI.Xaml.Controls;
 using Microsoft.Web.WebView2.Core;
 using System.Collections.Generic;
 using System.Linq;
+using System.Threading.Tasks;
 
 namespace PDFPreviewUWP
 {
@@ -46,9 +47,28 @@ namespace PDFPreviewUWP
                 // Initialize transfer method combo box first
                 InitializeTransferMethodComboBox();
                 
+                UpdateStatus("Initializing PDF manager...");
+                Debug.WriteLine("🔄 Starting PDF manager initialization");
+                
                 // Initialize PDF manager with WebView2 control
                 pdfManager = new PDFPreviewManager(PDFWebView);
-                await pdfManager.InitializeAsync();
+                
+                // Add timeout for initialization to prevent hanging
+                var initializationTask = pdfManager.InitializeAsync();
+                var timeoutTask = Task.Delay(TimeSpan.FromSeconds(30)); // 30 second timeout
+                
+                var completedTask = await Task.WhenAny(initializationTask, timeoutTask);
+                
+                if (completedTask == timeoutTask)
+                {
+                    UpdateStatus("❌ Initialization timeout - WebView2 setup taking too long");
+                    Debug.WriteLine("❌ PDF manager initialization timed out after 30 seconds");
+                    Debug.WriteLine("💡 This might indicate WebView2 runtime issues or virtual host mapping problems");
+                    return;
+                }
+                
+                await initializationTask; // Re-await to get any exceptions
+                Debug.WriteLine("✅ PDF manager initialization completed");
                 
                 // Show registry configuration info if file URLs are enabled
                 if (AppConfig.UseFileUrls)
@@ -56,22 +76,22 @@ namespace PDFPreviewUWP
                     Debug.WriteLine("🔧 File URL mode enabled");
                     Debug.WriteLine("If PDFs don't load, you may need to configure WebView2 via registry:");
                     Debug.WriteLine(PDFPreviewManager.GetRegistryConfigurationInstructions());
-                    
-                    // Optional: Test file URL access after initialization
-                    // var fileUrlWorks = await pdfManager.TestFileUrlAccess();
-                    // Debug.WriteLine($"File URL access test: {(fileUrlWorks ? "✅ Passed" : "❌ Failed")}");
                 }
                 
                 // Load the MFE using configuration
                 string mfeUrl = AppConfig.GetMFEUrl();
                 UpdateStatus($"Loading MFE from: {AppConfig.CurrentEnvironment} (Using {GetCurrentMethodDisplayName()})");
+                Debug.WriteLine($"🌐 Loading MFE from: {mfeUrl}");
+                
                 pdfManager.LoadMFE(mfeUrl);
                 UpdateStatus("MFE loaded successfully");
+                Debug.WriteLine("✅ MFE navigation initiated");
             }
             catch (Exception ex)
             {
                 UpdateStatus($"Error initializing: {ex.Message}");
-                Debug.WriteLine($"Initialization error: {ex}");
+                Debug.WriteLine($"❌ Initialization error: {ex}");
+                Debug.WriteLine($"Stack trace: {ex.StackTrace}");
             }
         }
 
@@ -87,6 +107,13 @@ namespace PDFPreviewUWP
                     Method = PDFLoadingMethod.ChunkedStream,
                     DisplayName = "Chunked Streaming",
                     Description = "2MB chunks via PostWebMessage - Best balance of performance and compatibility",
+                    IsRecommended = false
+                },
+                new PDFTransferMethodItem
+                {
+                    Method = PDFLoadingMethod.VirtualHost,
+                    DisplayName = "Virtual Host Mapping",
+                    Description = "Secure local file mapping - Modern approach, no browser arguments needed",
                     IsRecommended = true
                 },
                 new PDFTransferMethodItem
@@ -151,6 +178,11 @@ namespace PDFPreviewUWP
                         Debug.WriteLine("See PDFPreviewManager.GetRegistryConfigurationInstructions() for setup details");
                         break;
                         
+                    case PDFLoadingMethod.VirtualHost:
+                        Debug.WriteLine("🌐 Virtual host mapping provides secure local file access without browser arguments");
+                        Debug.WriteLine("ℹ️ Maps local folder to https://localassets.web/ for secure access");
+                        break;
+                        
                     case PDFLoadingMethod.CustomStream:
                         Debug.WriteLine("ℹ️ Custom stream handler provides the best performance for large files");
                         break;
@@ -177,6 +209,7 @@ namespace PDFPreviewUWP
                 PDFLoadingMethod.CustomStream => "Custom Stream Handler",
                 PDFLoadingMethod.DataURL => "Data URL (Base64)",
                 PDFLoadingMethod.FileURL => "File URL",
+                PDFLoadingMethod.VirtualHost => "Virtual Host Mapping",
                 _ => "Unknown Method"
             };
         }
@@ -246,6 +279,66 @@ namespace PDFPreviewUWP
             {
                 UpdateStatus($"Stream handler test failed: {ex.Message}");
                 Debug.WriteLine($"❌ Stream handler test error: {ex}");
+            }
+        }
+
+        private async void TestVirtualHostButton_Click(object sender, RoutedEventArgs e)
+        {
+            try
+            {
+                UpdateStatus("Testing virtual host mapping...");
+                
+                if (pdfManager == null)
+                {
+                    UpdateStatus("Error: PDF manager not initialized");
+                    return;
+                }
+
+                // Test the virtual host mapping setup
+                await pdfManager.TestVirtualHostMappingAsync();
+                
+                UpdateStatus("Virtual host mapping test completed - check debug output");
+                Debug.WriteLine("🧪 Virtual host mapping test completed. Check the debug output above for details.");
+            }
+            catch (Exception ex)
+            {
+                UpdateStatus($"Virtual host mapping test failed: {ex.Message}");
+                Debug.WriteLine($"❌ Virtual host mapping test error: {ex}");
+            }
+        }
+
+        private async void TestMFEDirectButton_Click(object sender, RoutedEventArgs e)
+        {
+            try
+            {
+                UpdateStatus("Testing direct MFE connection...");
+                Debug.WriteLine("🧪 Testing direct MFE connection without full initialization");
+                
+                if (pdfManager == null)
+                {
+                    UpdateStatus("Creating minimal PDF manager...");
+                    pdfManager = new PDFPreviewManager(PDFWebView);
+                    
+                    // Minimal WebView2 initialization without virtual host setup
+                    await PDFWebView.EnsureCoreWebView2Async();
+                    PDFWebView.CoreWebView2.Settings.AreDevToolsEnabled = true;
+                    Debug.WriteLine("✅ Minimal WebView2 initialization completed");
+                }
+                
+                // Test direct navigation to MFE
+                string mfeUrl = AppConfig.GetMFEUrl();
+                UpdateStatus($"Navigating directly to: {mfeUrl}");
+                Debug.WriteLine($"🌐 Direct navigation to: {mfeUrl}");
+                
+                PDFWebView.CoreWebView2.Navigate(mfeUrl);
+                
+                UpdateStatus("Direct MFE navigation completed - check if content loads");
+                Debug.WriteLine("✅ Direct MFE navigation initiated");
+            }
+            catch (Exception ex)
+            {
+                UpdateStatus($"Direct MFE test failed: {ex.Message}");
+                Debug.WriteLine($"❌ Direct MFE test error: {ex}");
             }
         }
 

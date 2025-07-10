@@ -130,6 +130,8 @@ namespace PDFPreviewUWP
                     return "Data URLs (Universal Compatibility)";
                 case PDFLoadingMethod.FileURL:
                     return "File URLs (Registry Configuration Required)";
+                case PDFLoadingMethod.VirtualHost:
+                    return "Virtual Host Mapping (Modern Secure Approach)";
                 case PDFLoadingMethod.ChunkedStream:
                     return $"Chunked Streaming ({ChunkSizeBytes / (1024 * 1024)}MB chunks, Progressive Loading)";
                 default:
@@ -161,6 +163,12 @@ namespace PDFPreviewUWP
         /// Direct file:// URLs (Requires browser arguments/registry configuration)
         /// </summary>
         FileURL,
+        
+        /// <summary>
+        /// Virtual host mapping (Modern secure approach, no browser arguments needed)
+        /// Maps local folder to virtual hostname like https://localassets.web/
+        /// </summary>
+        VirtualHost,
         
         /// <summary>
         /// Chunked streaming via PostWebMessageAsString (2MB chunks, progressive loading)

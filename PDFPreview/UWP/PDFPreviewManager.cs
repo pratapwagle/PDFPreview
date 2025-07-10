@@ -8,6 +8,7 @@ using Newtonsoft.Json;
 using System.Diagnostics;
 using System.Collections.Generic;
 using Windows.Storage.Streams;
+using System.Reflection;
 
 namespace PDFPreviewUWP
 {
@@ -57,6 +58,9 @@ namespace PDFPreviewUWP
                 // after the WebView2 is fully ready
                 webView.CoreWebView2.NavigationCompleted += OnNavigationCompleted;
                 
+                // Setup virtual host mapping for secure local file access
+                await SetupVirtualHostMappingAsync();
+                
                 // Always setup custom stream handler for uwp-pdf:// protocol immediately
                 // This ensures it's available even if user switches to CustomStream method later
                 await SetupCustomStreamHandler();
@@ -72,6 +76,18 @@ namespace PDFPreviewUWP
                     {
                         Debug.WriteLine("⚠️ File URL access test failed - consider using registry configuration");
                         Debug.WriteLine("💡 Alternative: Switch to DataURL or ChunkedStream method");
+                    }
+                }
+                
+                // Test virtual host mapping if using VirtualHost method
+                if (AppConfig.CurrentPDFMethod == PDFLoadingMethod.VirtualHost)
+                {
+                    Debug.WriteLine("🧪 Testing virtual host mapping...");
+                    var virtualHostWorks = await TestVirtualHostMappingAsync();
+                    if (!virtualHostWorks)
+                    {
+                        Debug.WriteLine("⚠️ Virtual host mapping test failed - WebView2 may not support this feature");
+                        Debug.WriteLine("💡 Alternative: Switch to DataURL or CustomStream method");
                     }
                 }
             }
@@ -216,6 +232,10 @@ namespace PDFPreviewUWP
                         
                     case PDFLoadingMethod.FileURL:
                         await LoadPDFWithFileUrlAsync(pdfFile);
+                        break;
+                        
+                    case PDFLoadingMethod.VirtualHost:
+                        await LoadPDFWithVirtualHostAsync(pdfFile);
                         break;
                         
                     case PDFLoadingMethod.ChunkedStream:
@@ -796,6 +816,47 @@ This will enable file:// URL access in WebView2 for your UWP app.
         }
 
         /// <summary>
+        /// Get information about the virtual host mapping configuration
+        /// Useful for debugging and understanding the setup
+        /// </summary>
+        public static string GetVirtualHostMappingInfo()
+        {
+            try
+            {
+                string localFolderPath = ApplicationData.Current.LocalFolder.Path;
+                string virtualHostName = "localassets.web";
+                
+                return $@"
+Virtual Host Mapping Configuration:
+=====================================
+Virtual Host Name: {virtualHostName}
+Mapped Folder: {localFolderPath}
+Example URL: https://{virtualHostName}/your-document.pdf
+
+How it works:
+1. PDFs are copied to the LocalFolder: {localFolderPath}
+2. WebView2 maps https://{virtualHostName}/ to this folder
+3. MFE can access files via: https://{virtualHostName}/filename.pdf
+4. This provides secure, direct file access without browser arguments
+
+Benefits:
+- More secure than file:// URLs
+- No browser argument configuration needed
+- Works with modern WebView2 versions
+- Direct file access without Base64 encoding
+
+Requirements:
+- WebView2 runtime version 1.0.664 or later
+- UWP app with appropriate file access permissions
+";
+            }
+            catch (Exception ex)
+            {
+                return $"Error getting virtual host info: {ex.Message}";
+            }
+        }
+
+        /// <summary>
         /// Test if WebView2 file URL access is working after initialization
         /// Call this method after WebView2 is initialized to verify file URL support
         /// </summary>
@@ -1166,6 +1227,333 @@ This will enable file:// URL access in WebView2 for your UWP app.
             catch (Exception ex)
             {
                 Debug.WriteLine($"❌ Error testing custom stream handler: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// Setup virtual host mapping for secure local file access
+        /// Maps the app's LocalFolder to a virtual host name for WebView2 access
+        /// </summary>
+        private async Task SetupVirtualHostMappingAsync()
+        {
+            try
+            {
+                // Check if WebView2 is initialized
+                if (webView?.CoreWebView2 == null)
+                {
+                    Debug.WriteLine("⚠️ Cannot setup virtual host mapping - WebView2 not initialized");
+                    return;
+                }
+
+                // Get the LocalState path and virtual host name
+                string localFolderPath = ApplicationData.Current.LocalFolder.Path;
+                string virtualHostName = "localassets.web";
+
+                Debug.WriteLine("🔄 Setting up virtual host mapping...");
+                Debug.WriteLine($"Local folder path: {localFolderPath}");
+                Debug.WriteLine($"Virtual host name: {virtualHostName}");
+                Debug.WriteLine($"WebView2 version: {webView.CoreWebView2.Environment.BrowserVersionString}");
+
+                // Map the entire LocalState folder to "localassets.web"
+                // The SetVirtualHostNameToFolderMapping API is available in WebView2 1.0.664+
+                // Our version (1.0.2210.55) should definitely support this
+                webView.CoreWebView2.SetVirtualHostNameToFolderMapping(
+                    virtualHostName,
+                    localFolderPath,
+                    CoreWebView2HostResourceAccessKind.Allow
+                );
+
+                Debug.WriteLine($"✅ Virtual host '{virtualHostName}' mapped to '{localFolderPath}'");
+                Debug.WriteLine($"💡 PDFs can now be accessed via https://{virtualHostName}/filename.pdf");
+                
+                // Set up a flag that the MFE can check for readiness
+                try
+                {
+                    await webView.CoreWebView2.ExecuteScriptAsync("window.virtualHostReady = true;");
+                    Debug.WriteLine("✅ Virtual host readiness flag set for MFE");
+                    
+                    // Also create a test file that the MFE can check for readiness verification
+                    try
+                    {
+                        var testFile = await ApplicationData.Current.LocalFolder.CreateFileAsync("virtualhost_verify.txt", CreationCollisionOption.ReplaceExisting);
+                        await FileIO.WriteTextAsync(testFile, "Virtual host mapping is active and ready");
+                        Debug.WriteLine("✅ Virtual host verification file created");
+                    }
+                    catch (Exception testEx)
+                    {
+                        Debug.WriteLine($"⚠️ Could not create verification file: {testEx.Message}");
+                    }
+                }
+                catch (Exception flagEx)
+                {
+                    Debug.WriteLine($"⚠️ Could not set virtual host flag: {flagEx.Message}");
+                }
+            }
+            catch (System.Runtime.InteropServices.COMException comEx)
+            {
+                Debug.WriteLine($"❌ COM Exception setting up virtual host mapping: {comEx.Message}");
+                Debug.WriteLine($"HRESULT: 0x{comEx.HResult:X8}");
+                Debug.WriteLine("This might indicate the feature is not supported or the path is invalid");
+                
+                // Set flag that virtual host setup failed
+                try
+                {
+                    await webView.CoreWebView2.ExecuteScriptAsync("window.virtualHostReady = false; window.virtualHostFailed = true;");
+                }
+                catch { /* Ignore if WebView2 is not responsive */ }
+            }
+            catch (NotSupportedException nsEx)
+            {
+                Debug.WriteLine($"❌ Virtual host mapping not supported: {nsEx.Message}");
+                Debug.WriteLine("This WebView2 version might not support virtual host mapping");
+                
+                // Set flag that virtual host is not supported
+                try
+                {
+                    await webView.CoreWebView2.ExecuteScriptAsync("window.virtualHostReady = false; window.virtualHostUnsupported = true;");
+                }
+                catch { /* Ignore if WebView2 is not responsive */ }
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"❌ Failed to setup virtual host mapping: {ex.Message}");
+                Debug.WriteLine($"Exception type: {ex.GetType().Name}");
+                Debug.WriteLine("Consider using DataURL or CustomStream methods as alternatives");
+                
+                // Set flag that virtual host setup failed
+                try
+                {
+                    await webView.CoreWebView2.ExecuteScriptAsync("window.virtualHostReady = false; window.virtualHostFailed = true;");
+                }
+                catch { /* Ignore if WebView2 is not responsive */ }
+            }
+        }
+
+        /// <summary>
+        /// Verify that virtual host mapping is working by creating and accessing a test file
+        /// </summary>
+        private async Task<bool> VerifyVirtualHostMappingAsync(string virtualHostName)
+        {
+            try
+            {
+                // Create a test file
+                var testFile = await ApplicationData.Current.LocalFolder.CreateFileAsync("virtualhost_verify.txt", CreationCollisionOption.ReplaceExisting);
+                await FileIO.WriteTextAsync(testFile, "Virtual host verification test");
+                
+                string testUrl = $"https://{virtualHostName}/virtualhost_verify.txt";
+                
+                // Test access via JavaScript
+                string testScript = $@"
+                    (async function() {{
+                        try {{
+                            const response = await fetch('{testUrl}');
+                            return response.ok ? 'VERIFY_SUCCESS' : 'VERIFY_FAILED';
+                        }} catch (error) {{
+                            return 'VERIFY_ERROR: ' + error.message;
+                        }}
+                    }})();
+                ";
+                
+                var result = await webView.CoreWebView2.ExecuteScriptAsync(testScript);
+                
+                // Clean up test file
+                try
+                {
+                    await testFile.DeleteAsync();
+                }
+                catch { /* Ignore cleanup errors */ }
+                
+                bool success = result.Contains("VERIFY_SUCCESS");
+                Debug.WriteLine($"Virtual host verification result: {result} (Success: {success})");
+                
+                return success;
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"⚠️ Virtual host verification failed: {ex.Message}");
+                return false;
+            }
+        }
+
+        /// <summary>
+        /// Test if virtual host mapping is working
+        /// Call this method after WebView2 is initialized to verify virtual host support
+        /// </summary>
+        public async Task<bool> TestVirtualHostMappingAsync()
+        {
+            try
+            {
+                if (webView?.CoreWebView2 == null)
+                {
+                    Debug.WriteLine("❌ WebView2 not initialized - cannot test virtual host mapping");
+                    return false;
+                }
+
+                Debug.WriteLine("🧪 Testing virtual host mapping...");
+                
+                // Create a test file in the local folder
+                var localFolder = ApplicationData.Current.LocalFolder;
+                var testFileName = "virtualhost_test.txt";
+                var testContent = "Virtual host test file content - " + DateTime.Now.ToString("HH:mm:ss");
+                var testFile = await localFolder.CreateFileAsync(testFileName, CreationCollisionOption.ReplaceExisting);
+                await FileIO.WriteTextAsync(testFile, testContent);
+
+                string virtualHostName = "localassets.web";
+                string testUrl = $"https://{virtualHostName}/{testFileName}";
+                
+                Debug.WriteLine($"🔗 Testing virtual host URL: {testUrl}");
+                
+                // Test by using a Promise-based approach that waits for the fetch result
+                string testScript = $@"
+                    (async function() {{
+                        try {{
+                            console.log('🧪 Testing virtual host URL: {testUrl}');
+                            
+                            // First, test if the virtual host domain resolves
+                            const startTime = performance.now();
+                            const response = await fetch('{testUrl}', {{
+                                method: 'GET',
+                                cache: 'no-cache',
+                                headers: {{
+                                    'Accept': 'text/plain,*/*'
+                                }}
+                            }});
+                            const fetchTime = performance.now() - startTime;
+                            
+                            console.log('📊 Fetch completed in', fetchTime.toFixed(2), 'ms');
+                            console.log('📊 Response status:', response.status, response.statusText);
+                            console.log('📊 Response headers:', [...response.headers.entries()]);
+                            
+                            if (response.ok) {{
+                                const content = await response.text();
+                                console.log('📄 Retrieved content length:', content.length, 'chars');
+                                console.log('📄 Content preview:', content.substring(0, 100));
+                                console.log('📄 Expected content contains:', '{testContent}');
+                                
+                                if (content.includes('Virtual host test file content')) {{
+                                    console.log('✅ Virtual host test SUCCESS - content matches expected pattern');
+                                    return 'VIRTUAL_HOST_SUCCESS';
+                                }} else {{
+                                    console.log('❌ Virtual host test FAILED - content mismatch');
+                                    console.log('Expected substring: Virtual host test file content');
+                                    console.log('Actual content:', JSON.stringify(content));
+                                    return 'VIRTUAL_HOST_CONTENT_MISMATCH';
+                                }}
+                            }} else {{
+                                console.log('❌ Virtual host test FAILED - HTTP error:', response.status, response.statusText);
+                                
+                                // Try to get more error details
+                                try {{
+                                    const errorText = await response.text();
+                                    console.log('❌ Error response body:', errorText);
+                                }} catch (e) {{
+                                    console.log('❌ Could not read error response body');
+                                }}
+                                
+                                return 'VIRTUAL_HOST_HTTP_ERROR_' + response.status;
+                            }}
+                        }} catch (error) {{
+                            console.log('❌ Virtual host test FAILED - Exception:', error.name, error.message);
+                            console.log('❌ Error stack:', error.stack);
+                            
+                            // Check for specific error types
+                            if (error.name === 'TypeError' && error.message.includes('Failed to fetch')) {{
+                                console.log('💡 This usually indicates virtual host mapping is not set up or accessible');
+                            }}
+                            if (error.name === 'NetworkError' || error.message.includes('ERR_NAME_NOT_RESOLVED')) {{
+                                console.log('💡 DNS resolution failed - virtual host mapping may not be configured');
+                            }}
+                            
+                            return 'VIRTUAL_HOST_EXCEPTION: ' + error.name + ' - ' + error.message;
+                        }}
+                    }})();
+                ";
+                
+                var result = await webView.CoreWebView2.ExecuteScriptAsync(testScript);
+                Debug.WriteLine($"📊 Virtual host test raw result: {result}");
+                
+                // Parse the result (ExecuteScriptAsync returns JSON-encoded strings)
+                string cleanResult = result?.Trim('"') ?? "";
+                Debug.WriteLine($"📊 Virtual host test clean result: {cleanResult}");
+                
+                // Clean up test file
+                try
+                {
+                    await testFile.DeleteAsync();
+                    Debug.WriteLine("🗑️ Cleaned up test file");
+                }
+                catch (Exception cleanupEx)
+                {
+                    Debug.WriteLine($"⚠️ Could not clean up test file: {cleanupEx.Message}");
+                }
+                
+                bool success = cleanResult.Contains("VIRTUAL_HOST_SUCCESS");
+                if (success)
+                {
+                    Debug.WriteLine("✅ Virtual host mapping test PASSED");
+                }
+                else
+                {
+                    Debug.WriteLine($"❌ Virtual host mapping test FAILED: {cleanResult}");
+                }
+                
+                return success;
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"❌ Error testing virtual host mapping: {ex.Message}");
+                Debug.WriteLine($"Exception type: {ex.GetType().Name}");
+                if (ex.InnerException != null)
+                {
+                    Debug.WriteLine($"Inner exception: {ex.InnerException.Message}");
+                }
+                return false;
+            }
+        }
+
+        /// <summary>
+        /// Load PDF using virtual host mapping (recommended for local files)
+        /// Copies file to local app data and uses a secure virtual URL
+        /// </summary>
+        private async Task LoadPDFWithVirtualHostAsync(StorageFile pdfFile)
+        {
+            try
+            {
+                Debug.WriteLine($"🔄 Loading PDF using Virtual Host method: {pdfFile.Name}");
+
+                // Copy the PDF to the app's local data folder to ensure it's in the mapped directory
+                var localFolder = ApplicationData.Current.LocalFolder;
+                var fileName = $"pdf_{DateTime.Now:yyyyMMdd_HHmmss}_{Guid.NewGuid().ToString("N").Substring(0, 8)}.pdf";
+                var destinationFile = await localFolder.CreateFileAsync(fileName, CreationCollisionOption.ReplaceExisting);
+                
+                await pdfFile.CopyAndReplaceAsync(destinationFile);
+
+                // The virtual host name must match the one set during initialization
+                string virtualHostName = "localassets.web";
+                string virtualUrl = $"https://{virtualHostName}/{destinationFile.Name}";
+
+                Debug.WriteLine($"Generated virtual host URL: {virtualUrl}");
+                Debug.WriteLine($"Copied to local file: {destinationFile.Path}");
+
+                var message = new
+                {
+                    type = "LOAD_PDF",
+                    fileName = pdfFile.Name,
+                    pdfUrl = virtualUrl,
+                    urlType = "virtual", // A new type for the MFE to recognize
+                    transferMethod = "VirtualHost",
+                    fileSize = (await destinationFile.GetBasicPropertiesAsync()).Size,
+                    timestamp = DateTime.UtcNow.ToString("O")
+                };
+
+                webView.CoreWebView2.PostWebMessageAsString(JsonConvert.SerializeObject(message));
+                Debug.WriteLine($"📤 Sent virtual host URL message for: {pdfFile.Name}");
+                Debug.WriteLine($"🌐 MFE can now access PDF at: {virtualUrl}");
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"❌ Error in LoadPDFWithVirtualHostAsync: {ex.Message}");
+                throw;
             }
         }
     }

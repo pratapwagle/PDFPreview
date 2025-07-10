@@ -18,6 +18,10 @@
             <Button x:Name="ClearPreviewButton" Content="Clear Preview" Click="ClearPreviewButton_Click"/>
             <Button x:Name="TestStreamHandlerButton" Content="Test Stream Handler" Click="TestStreamHandlerButton_Click" 
                     ToolTipService.ToolTip="Test the custom stream handler registration (for debugging)"/>
+            <Button x:Name="TestVirtualHostButton" Content="Test Virtual Host" Click="TestVirtualHostButton_Click" 
+                    ToolTipService.ToolTip="Test the virtual host mapping configuration (for debugging)"/>
+            <Button x:Name="TestMFEDirectButton" Content="Test MFE Direct" Click="TestMFEDirectButton_Click" 
+                    ToolTipService.ToolTip="Test direct MFE loading without complex initialization (for debugging)"/>
             
             <!-- PDF Transfer Method Selection -->
             <StackPanel Orientation="Horizontal" Spacing="5">
