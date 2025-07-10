@@ -238,6 +238,10 @@ namespace PDFPreviewUWP
                         await LoadPDFWithVirtualHostAsync(pdfFile);
                         break;
                         
+                    case PDFLoadingMethod.VirtualHostNormal:
+                        await LoadPDFWithVirtualHostNormalAsync(pdfFile);
+                        break;
+                        
                     case PDFLoadingMethod.ChunkedStream:
                         await LoadPDFWithChunkedStreamingAsync(pdfFile);
                         break;
@@ -1494,7 +1498,7 @@ Requirements:
                     fileName = pdfFile.Name,
                     pdfUrl = virtualUrl,
                     urlType = "virtual", // A new type for the MFE to recognize
-                    transferMethod = "VirtualHost",
+                    transferMethod = "VirtualHostLazy",
                     fileSize = (await destinationFile.GetBasicPropertiesAsync()).Size,
                     timestamp = DateTime.UtcNow.ToString("O")
                 };
@@ -1506,6 +1510,52 @@ Requirements:
             catch (Exception ex)
             {
                 Debug.WriteLine($"❌ Error in LoadPDFWithVirtualHostAsync: {ex.Message}");
+                throw;
+            }
+        }
+
+        /// <summary>
+        /// Load PDF using virtual host mapping with normal loading (recommended for local files)
+        /// Copies file to local app data and uses a secure virtual URL with "VirtualHostNormal" transfer method
+        /// </summary>
+        private async Task LoadPDFWithVirtualHostNormalAsync(StorageFile pdfFile)
+        {
+            try
+            {
+                Debug.WriteLine($"🔄 Loading PDF using Virtual Host Normal method: {pdfFile.Name}");
+
+                // Copy the PDF to the app's local data folder to ensure it's in the mapped directory
+                var localFolder = ApplicationData.Current.LocalFolder;
+                var fileName = $"pdf_{DateTime.Now:yyyyMMdd_HHmmss}_{Guid.NewGuid().ToString("N").Substring(0, 8)}.pdf";
+                var destinationFile = await localFolder.CreateFileAsync(fileName, CreationCollisionOption.ReplaceExisting);
+                
+                await pdfFile.CopyAndReplaceAsync(destinationFile);
+
+                // The virtual host name must match the one set during initialization
+                string virtualHostName = "localassets.web";
+                string virtualUrl = $"https://{virtualHostName}/{destinationFile.Name}";
+
+                Debug.WriteLine($"Generated virtual host URL: {virtualUrl}");
+                Debug.WriteLine($"Copied to local file: {destinationFile.Path}");
+
+                var message = new
+                {
+                    type = "LOAD_PDF",
+                    fileName = pdfFile.Name,
+                    pdfUrl = virtualUrl,
+                    urlType = "virtual", // A new type for the MFE to recognize
+                    transferMethod = "VirtualHostNormal",
+                    fileSize = (await destinationFile.GetBasicPropertiesAsync()).Size,
+                    timestamp = DateTime.UtcNow.ToString("O")
+                };
+
+                webView.CoreWebView2.PostWebMessageAsString(JsonConvert.SerializeObject(message));
+                Debug.WriteLine($"📤 Sent virtual host normal URL message for: {pdfFile.Name}");
+                Debug.WriteLine($"🌐 MFE can now access PDF at: {virtualUrl} (Normal Loading)");
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"❌ Error in LoadPDFWithVirtualHostNormalAsync: {ex.Message}");
                 throw;
             }
         }

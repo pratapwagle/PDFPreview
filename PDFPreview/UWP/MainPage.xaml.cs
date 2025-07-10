@@ -112,9 +112,16 @@ namespace PDFPreviewUWP
                 new PDFTransferMethodItem
                 {
                     Method = PDFLoadingMethod.VirtualHost,
-                    DisplayName = "Virtual Host Mapping",
-                    Description = "Secure local file mapping - Modern approach, no browser arguments needed",
+                    DisplayName = "Virtual Host Mapping (Lazy)",
+                    Description = "Secure local file mapping with lazy loading - Pages load on demand",
                     IsRecommended = true
+                },
+                new PDFTransferMethodItem
+                {
+                    Method = PDFLoadingMethod.VirtualHostNormal,
+                    DisplayName = "Virtual Host Mapping (Normal)",
+                    Description = "Secure local file mapping with normal loading - Full PDF loads at once",
+                    IsRecommended = false
                 },
                 new PDFTransferMethodItem
                 {
@@ -179,8 +186,13 @@ namespace PDFPreviewUWP
                         break;
                         
                     case PDFLoadingMethod.VirtualHost:
-                        Debug.WriteLine("🌐 Virtual host mapping provides secure local file access without browser arguments");
-                        Debug.WriteLine("ℹ️ Maps local folder to https://localassets.web/ for secure access");
+                        Debug.WriteLine("🌐 Virtual host mapping with lazy loading provides secure local file access");
+                        Debug.WriteLine("ℹ️ Maps local folder to https://localassets.web/ for secure access with page-by-page loading");
+                        break;
+                        
+                    case PDFLoadingMethod.VirtualHostNormal:
+                        Debug.WriteLine("🌐 Virtual host mapping with normal loading provides secure local file access");
+                        Debug.WriteLine("ℹ️ Maps local folder to https://localassets.web/ for secure access with full PDF loading");
                         break;
                         
                     case PDFLoadingMethod.CustomStream:

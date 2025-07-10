@@ -771,57 +771,416 @@
                     return;
                 }
                 
+                // Check if this is lazy loading or normal loading based on transfer method
+                const isLazyLoading = transferMethod.includes('Lazy') || transferMethod.includes('lazy');
+                
                 // Notify UWP that we're starting to load from virtual host
                 this.sendMessageToUWP({
                     type: 'PDF_LOADING',
-                    message: 'Loading PDF from virtual host mapping',
+                    message: `Loading PDF from virtual host mapping${isLazyLoading ? ' with lazy loading' : ''}`,
                     url: virtualUrl,
-                    method: 'virtual-host',
+                    method: isLazyLoading ? 'virtual-host-lazy' : 'virtual-host',
                     transferMethod: transferMethod
                 });
                 
-                // Virtual host URLs should be treated like regular HTTPS URLs
-                // since they're mapped by WebView2's SetVirtualHostNameToFolderMapping
+                // Start timing for virtual host loading
+                this.startTiming('Loading PDF (VirtualHost)', transferMethod, `Loading PDF${isLazyLoading ? ' with lazy loading' : ''} from ${virtualUrl}`);
                 
-                // Method 1: Direct iframe (recommended for virtual hosts)
-                if (this.useIframeMethod()) {
-                    console.log('Loading virtual host PDF in iframe...');
-                    this.loadPDFInIframe(virtualUrl, transferMethod);
-                    return;
-                }
-                
-                // Method 2: PDF.js with fetch (also works with virtual hosts)
-                if (window.pdfjsLib) {
-                    try {
-                        console.log('Attempting to load virtual host PDF with PDF.js...');
-                        
-                        const response = await fetch(virtualUrl);
-                        if (!response.ok) {
-                            throw new Error(`Virtual host fetch error! status: ${response.status}`);
+                // Choose loading method based on transferMethod
+                if (isLazyLoading) {
+                    // Use lazy loading with PDF.js for better performance
+                    if (window.pdfjsLib) {
+                        try {
+                            console.log('🚀 Using PDF.js with lazy loading for virtual host URL');
+                            await this.loadLazyVirtualHostPDF(virtualUrl, transferMethod);
+                            return;
+                        } catch (error) {
+                            console.warn('PDF.js lazy loading failed:', error);
+                            console.log('Falling back to iframe method...');
                         }
-                        
-                        const arrayBuffer = await response.arrayBuffer();
-                        const loadingTask = window.pdfjsLib.getDocument(new Uint8Array(arrayBuffer));
-                        const pdf = await loadingTask.promise;
-                        
-                        console.log('PDF loaded via virtual host with PDF.js');
-                        await this.renderPDF(pdf);
-                        
-                        // Add a small delay to account for browser's final paint operations
-                        setTimeout(() => {
-                            this.onPDFLoaded('pdfjs', transferMethod);
-                        }, 100); // Small delay to ensure rendering is truly complete
-                        return;
-                    } catch (pdfError) {
-                        console.warn('PDF.js virtual host loading failed:', pdfError);
-                        // Fallback to iframe
-                        this.loadPDFInIframe(virtualUrl, transferMethod);
-                        return;
+                    }
+                } else {
+                    // Use normal loading (complete PDF at once)
+                    if (window.pdfjsLib) {
+                        try {
+                            console.log('📄 Using PDF.js with normal loading for virtual host URL');
+                            await this.loadNormalVirtualHostPDF(virtualUrl, transferMethod);
+                            return;
+                        } catch (error) {
+                            console.warn('PDF.js normal loading failed:', error);
+                            console.log('Falling back to iframe method...');
+                        }
                     }
                 }
                 
-                // Final fallback: Direct iframe
+                // Fallback: Direct iframe (for when PDF.js fails or isn't available)
+                console.log('Loading virtual host PDF in iframe...');
                 this.loadPDFInIframe(virtualUrl, transferMethod);
+            }
+
+            async loadNormalVirtualHostPDF(virtualUrl, transferMethod) {
+                try {
+                    console.log('📄 Loading complete PDF with PDF.js (normal mode)');
+                    
+                    // Show loading UI
+                    this.showLoadingState();
+                    
+                    // Load complete PDF at once
+                    const response = await fetch(virtualUrl);
+                    if (!response.ok) {
+                        throw new Error(`Virtual host fetch error! status: ${response.status}`);
+                    }
+                    
+                    const arrayBuffer = await response.arrayBuffer();
+                    const loadingTask = window.pdfjsLib.getDocument(new Uint8Array(arrayBuffer));
+                    const pdf = await loadingTask.promise;
+                    
+                    console.log(`✅ PDF loaded completely: ${pdf.numPages} pages`);
+                    this.endTiming(true, `PDF loaded completely (${pdf.numPages} pages)`);
+                    
+                    // Render all pages at once
+                    await this.renderPDF(pdf);
+                    
+                    // Add a small delay to account for browser's final paint operations
+                    setTimeout(() => {
+                        this.onPDFLoaded('pdfjs-normal', transferMethod);
+                    }, 100);
+                    
+                } catch (error) {
+                    console.error('Failed to load PDF in normal mode:', error);
+                    throw error; // Re-throw to trigger fallback
+                }
+            }
+
+            async loadLazyVirtualHostPDF(virtualUrl, transferMethod) {
+                try {
+                    // Show immediate loading UI
+                    this.showLazyLoadingUI(virtualUrl, transferMethod);
+                    
+                    // Configure PDF.js for lazy loading with range requests
+                    const loadingTask = window.pdfjsLib.getDocument({
+                        url: virtualUrl,
+                        // Enable range requests for lazy loading
+                        rangeChunkSize: 65536, // 64KB chunks for smooth loading
+                        disableAutoFetch: true, // Don't fetch all pages at once
+                        disableStream: false,   // Allow streaming
+                        disableRange: false     // Enable HTTP range requests
+                    });
+                    
+                    // Wait for PDF structure to load (just header and page index)
+                    const pdf = await loadingTask.promise;
+                    
+                    console.log(`✅ PDF structure loaded: ${pdf.numPages} pages available for lazy loading`);
+                    this.endTiming(true, `PDF structure loaded (${pdf.numPages} pages)`);
+                    
+                    // Set up lazy loading viewer with page-by-page rendering
+                    this.setupLazyLoadPDFViewer(pdf, virtualUrl, transferMethod);
+                    
+                } catch (error) {
+                    console.error('Failed to load PDF structure for lazy loading:', error);
+                    throw error; // Re-throw to trigger fallback
+                }
+            }
+
+            showLazyLoadingUI(virtualUrl, transferMethod) {
+                const container = document.getElementById('pdfContainer');
+                if (container) {
+                    container.style.cssText = `
+                        padding: 0;
+                        background: #525659;
+                        display: flex;
+                        flex-direction: column;
+                        width: 100%;
+                        min-height: 70vh;
+                    `;
+                    
+                    container.innerHTML = `
+                        <div style="
+                            background: #333;
+                            color: white;
+                            padding: 15px;
+                            text-align: center;
+                            border-bottom: 2px solid #555;
+                        ">
+                            <div class="loading-spinner" style="margin: 0 auto 10px auto;"></div>
+                            <h3 style="margin: 0 0 10px 0;">🔄 Loading PDF Structure...</h3>
+                            <p style="margin: 0; opacity: 0.8;">Preparing lazy loading viewer...</p>
+                        </div>
+                        <div style="
+                            flex: 1;
+                            display: flex;
+                            align-items: center;
+                            justify-content: center;
+                            color: white;
+                            opacity: 0.6;
+                        ">
+                            <div style="text-align: center;">
+                                <div style="font-size: 4em; margin-bottom: 20px;">📄</div>
+                                <p>Initializing Virtual Host Lazy Loading...</p>
+                                <p style="font-size: 0.9em; margin-top: 10px;">First page will load immediately</p>
+                            </div>
+                        </div>
+                    `;
+                }
+                showStatus('Loading PDF structure for lazy viewing...', 'loading');
+            }
+
+            setupLazyLoadPDFViewer(pdf, virtualUrl, transferMethod) {
+                const container = document.getElementById('pdfContainer');
+                let currentPageNum = 1;
+                const totalPages = pdf.numPages;
+                let pageCache = new Map(); // Cache rendered pages
+                
+                // Start timing for first page render
+                this.startTiming('Rendering First Page', transferMethod, 'Loading page 1 for immediate preview');
+
+                container.style.cssText = `padding: 0; background: #525659; width: 100%; min-height: 70vh;`;
+                container.innerHTML = `
+                    <div style="display: flex; flex-direction: column; height: 100vh; width: 100%;">
+                        <!-- Navigation Controls -->
+                        <div id="pdf-lazy-controls" style="
+                            padding: 10px 15px;
+                            background: linear-gradient(135deg, #2c3e50, #34495e);
+                            color: white;
+                            display: flex;
+                            justify-content: space-between;
+                            align-items: center;
+                            box-shadow: 0 2px 10px rgba(0,0,0,0.3);
+                            border-bottom: 1px solid #555;
+                        ">
+                            <div style="display: flex; align-items: center; gap: 10px;">
+                                <button id="prev-page" style="
+                                    background: #3498db;
+                                    color: white;
+                                    border: none;
+                                    padding: 8px 12px;
+                                    border-radius: 4px;
+                                    cursor: pointer;
+                                    font-size: 14px;
+                                ">◄ Prev</button>
+                                <span style="
+                                    display: flex;
+                                    align-items: center;
+                                    gap: 5px;
+                                    font-weight: 500;
+                                ">
+                                    Page 
+                                    <input type="number" id="page-num" value="1" min="1" max="${totalPages}" style="
+                                        width: 60px;
+                                        text-align: center;
+                                        padding: 4px;
+                                        border: 1px solid #555;
+                                        border-radius: 3px;
+                                        background: #2c3e50;
+                                        color: white;
+                                    "> 
+                                    of ${totalPages}
+                                </span>
+                                <button id="next-page" style="
+                                    background: #3498db;
+                                    color: white;
+                                    border: none;
+                                    padding: 8px 12px;
+                                    border-radius: 4px;
+                                    cursor: pointer;
+                                    font-size: 14px;
+                                ">Next ►</button>
+                            </div>
+                            
+                            <div style="display: flex; align-items: center; gap: 15px;">
+                                <div id="loading-indicator" style="
+                                    display: none;
+                                    color: #f39c12;
+                                    font-size: 14px;
+                                ">
+                                    🔄 Loading page...
+                                </div>
+                                <div style="font-size: 14px; opacity: 0.8;">
+                                    Virtual Host Lazy Loading
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- PDF Render Area -->
+                        <div id="pdf-lazy-render" style="
+                            flex: 1;
+                            padding: 20px;
+                            overflow: auto;
+                            text-align: center;
+                            background: #525659;
+                        ">
+                            <div id="page-container" style="
+                                display: inline-block;
+                                background: white;
+                                box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+                                border-radius: 8px;
+                                padding: 10px;
+                                margin: 0 auto;
+                            ">
+                                <canvas id="pdf-canvas" style="
+                                    display: block;
+                                    max-width: 100%;
+                                    height: auto;
+                                "></canvas>
+                            </div>
+                            
+                            <div id="page-info" style="
+                                margin-top: 15px;
+                                color: white;
+                                font-size: 14px;
+                                opacity: 0.7;
+                            ">
+                                Lazy loading enabled - pages load on demand
+                            </div>
+                        </div>
+                    </div>
+                `;
+
+                const pageNumInput = document.getElementById('page-num');
+                const prevBtn = document.getElementById('prev-page');
+                const nextBtn = document.getElementById('next-page');
+                const canvas = document.getElementById('pdf-canvas');
+                const context = canvas.getContext('2d');
+                const loadingIndicator = document.getElementById('loading-indicator');
+                const pageInfo = document.getElementById('page-info');
+
+                const showLoading = (show) => {
+                    loadingIndicator.style.display = show ? 'block' : 'none';
+                };
+
+                const renderPage = async (num, showTiming = true) => {
+                    try {
+                        if (showTiming) {
+                            this.startTiming(`Loading Page ${num}`, transferMethod, `Lazy loading page ${num} of ${totalPages}`);
+                        }
+                        
+                        showLoading(true);
+                        pageInfo.textContent = `Loading page ${num}...`;
+                        
+                        // Check cache first
+                        if (pageCache.has(num)) {
+                            console.log(`📋 Using cached page ${num}`);
+                            const cachedImageData = pageCache.get(num);
+                            canvas.width = cachedImageData.width;
+                            canvas.height = cachedImageData.height;
+                            context.putImageData(cachedImageData.imageData, 0, 0);
+                            
+                            showLoading(false);
+                            pageInfo.textContent = `Page ${num} (cached)`;
+                            
+                            if (showTiming) {
+                                this.endTiming(true, `Page ${num} loaded from cache`);
+                            }
+                            return;
+                        }
+                        
+                        // Fetch page on demand (this triggers HTTP range request)
+                        console.log(`🔄 Fetching page ${num} on demand...`);
+                        const page = await pdf.getPage(num);
+                        
+                        // Calculate optimal scale for container
+                        const container = document.getElementById('pdf-lazy-render');
+                        const maxWidth = container.clientWidth - 60; // Account for padding
+                        const viewport = page.getViewport({ scale: 1.0 });
+                        const scale = Math.min(maxWidth / viewport.width, 2.5, window.devicePixelRatio || 1);
+                        const scaledViewport = page.getViewport({ scale: scale });
+                        
+                        // Set canvas dimensions
+                        canvas.height = scaledViewport.height;
+                        canvas.width = scaledViewport.width;
+                        
+                        // Render the page
+                        await page.render({ canvasContext: context, viewport: scaledViewport }).promise;
+                        
+                        // Cache the rendered page
+                        const imageData = context.getImageData(0, 0, canvas.width, canvas.height);
+                        pageCache.set(num, {
+                            imageData: imageData,
+                            width: canvas.width,
+                            height: canvas.height
+                        });
+                        
+                        console.log(`✅ Page ${num} rendered and cached`);
+                        
+                        showLoading(false);
+                        pageInfo.textContent = `Page ${num} of ${totalPages} (loaded via range request)`;
+                        
+                        // Update controls
+                        pageNumInput.value = num;
+                        prevBtn.disabled = num <= 1;
+                        nextBtn.disabled = num >= totalPages;
+                        
+                        if (showTiming) {
+                            this.endTiming(true, `Page ${num} loaded and rendered`);
+                        }
+                        
+                        // Notify UWP of successful page load
+                        this.sendMessageToUWP({
+                            type: 'PDF_PAGE_LOADED',
+                            message: `Page ${num} loaded via lazy loading`,
+                            page: num,
+                            totalPages: totalPages,
+                            method: 'virtual-host-lazy',
+                            transferMethod: transferMethod
+                        });
+                        
+                    } catch (error) {
+                        console.error(`❌ Error rendering page ${num}:`, error);
+                        showLoading(false);
+                        pageInfo.textContent = `Error loading page ${num}: ${error.message}`;
+                        
+                        if (showTiming) {
+                            this.endTiming(false, `Failed to load page ${num}: ${error.message}`);
+                        }
+                    }
+                };
+
+                // Navigation event handlers
+                prevBtn.onclick = () => { 
+                    if (currentPageNum > 1) {
+                        currentPageNum--;
+                        renderPage(currentPageNum);
+                    }
+                };
+                
+                nextBtn.onclick = () => { 
+                    if (currentPageNum < totalPages) {
+                        currentPageNum++;
+                        renderPage(currentPageNum);
+                    }
+                };
+                
+                pageNumInput.onchange = () => {
+                    const newPage = parseInt(pageNumInput.value);
+                    if (newPage > 0 && newPage <= totalPages && newPage !== currentPageNum) {
+                        currentPageNum = newPage;
+                        renderPage(currentPageNum);
+                    }
+                };
+
+                // Keyboard navigation
+                document.addEventListener('keydown', (e) => {
+                    if (e.target.tagName.toLowerCase() === 'input') return; // Don't interfere with input fields
+                    
+                    if (e.key === 'ArrowLeft' && currentPageNum > 1) {
+                        currentPageNum--;
+                        renderPage(currentPageNum);
+                        e.preventDefault();
+                    } else if (e.key === 'ArrowRight' && currentPageNum < totalPages) {
+                        currentPageNum++;
+                        renderPage(currentPageNum);
+                        e.preventDefault();
+                    }
+                });
+
+                // Load the first page immediately
+                renderPage(currentPageNum);
+                
+                // Notify successful lazy loading setup
+                setTimeout(() => {
+                    this.onPDFLoaded('lazy-virtual-host', transferMethod);
+                    showStatus(`PDF ready for lazy loading (${totalPages} pages)`, 'success');
+                }, 100);
             }
 
             async loadDataUrlPDF(dataUrl, transferMethod = 'DataURL') {
@@ -845,7 +1204,10 @@
                         console.log(`PDF loaded successfully: ${pdf.numPages} pages`);
                         await this.renderPDF(pdf);
                         
-                        this.onPDFLoaded('pdfjs-dataurl', transferMethod);
+                        // Add a small delay to account for browser's final paint operations
+                        setTimeout(() => {
+                            this.onPDFLoaded('pdfjs-dataurl', transferMethod);
+                        }, 100);
                     } catch (error) {
                         console.warn('PDF.js data URL failed:', error);
                         console.log('Falling back to iframe method...');
@@ -1710,6 +2072,11 @@ webView.CoreWebView2.SetVirtualHostNameToFolderMapping(
                             message: 'MFE initialized and ready for PDF loading'
                         });
                         console.log('Notified UWP that MFE is ready');
+                        
+                        // Debug: Test custom stream handler
+                        setTimeout(() => {
+                            this.debugCustomStreamHandler();
+                        }, 2000); // Wait 2 seconds after MFE ready
                     }, 1000);
                 }
             }
@@ -1767,50 +2134,77 @@ webView.CoreWebView2.SetVirtualHostNameToFolderMapping(
                 }
             }
 
-            waitForPDFToRender(iframe, transferMethod, attempt = 1, maxAttempts = 20) {
-                // Smart detection for when PDF content is actually rendered in iframe
+            waitForPDFToRender(iframe, transferMethod, attempt = 1, maxAttempts = 30) {
+                // Enhanced detection for when PDF content is actually rendered and visible
                 // This provides more accurate timing that reflects the actual user experience
                 
-                const checkInterval = 150; // Check every 150ms
-                const maxWaitTime = maxAttempts * checkInterval; // Max 3 seconds total
+                const checkInterval = 200; // Check every 200ms for more realistic timing
+                const maxWaitTime = maxAttempts * checkInterval; // Max 6 seconds total
                 
                 console.log(`⏱️ Checking PDF render status (attempt ${attempt}/${maxAttempts})...`);
                 
                 try {
-                    // For PDFs in iframes, we can't always access the content due to cross-origin restrictions
-                    // But we can use a combination of timing and heuristics
+                    // Method 1: Progressive timing approach - require longer wait times for more confidence
+                    const actualWaitTime = attempt * checkInterval;
+                    const minWaitTime = 1500; // Minimum 1.5 seconds for realistic PDF loading
+                    const confidenceWaitTime = 2500; // 2.5 seconds for high confidence
                     
-                    // Method 1: Check if iframe has reasonable dimensions (indicates content loaded)
+                    // Method 2: Check iframe dimensions (basic requirement)
                     const hasValidDimensions = iframe.offsetHeight > 100 && iframe.offsetWidth > 100;
                     
-                    // Method 2: For virtual host, assume rendering is complete after a minimum wait time
-                    const minWaitTime = 800; // Minimum 800ms for realistic PDF loading
-                    const actualWaitTime = attempt * checkInterval;
-                    const hasWaitedMinimum = actualWaitTime >= minWaitTime;
+                    // Method 3: Try to detect if the iframe appears to have loaded content
+                    let hasContent = false;
+                    try {
+                        // For same-origin iframes, we can check if they have content
+                        if (iframe.contentDocument && iframe.contentDocument.body) {
+                            const bodyContent = iframe.contentDocument.body.innerText || iframe.contentDocument.body.textContent;
+                            hasContent = bodyContent.length > 0;
+                            console.log(`📄 Iframe content check: ${hasContent ? 'has content' : 'empty'}`);
+                        } else {
+                            // For cross-origin (like virtual host), we can't access content
+                            // So we rely more heavily on timing
+                            console.log(`🔒 Cross-origin iframe - using timing-based detection`);
+                        }
+                    } catch (crossOriginError) {
+                        // Expected for cross-origin iframes (virtual host)
+                        console.log(`🔒 Cross-origin access (expected for virtual host)`);
+                    }
                     
-                    if (hasValidDimensions && hasWaitedMinimum) {
-                        console.log(`✅ PDF appears to be rendered (waited ${actualWaitTime}ms)`);
+                    // Decision logic: Be more conservative about when PDF is "ready"
+                    const hasWaitedMinimum = actualWaitTime >= minWaitTime;
+                    const hasWaitedConfidence = actualWaitTime >= confidenceWaitTime;
+                    
+                    // For cross-origin (virtual host), require longer wait time
+                    const isVirtualHost = iframe.src && iframe.src.includes('localassets.web');
+                    const requiredWaitTime = isVirtualHost ? confidenceWaitTime : minWaitTime;
+                    
+                    if (hasValidDimensions && actualWaitTime >= requiredWaitTime) {
+                        console.log(`✅ PDF appears to be rendered (waited ${actualWaitTime}ms, method: ${isVirtualHost ? 'virtual-host' : 'standard'})`);
                         this.onPDFLoaded('iframe', transferMethod);
                         return;
                     }
                     
-                    // Method 3: If we've waited long enough, assume it's ready
+                    // Method 4: If we've waited the maximum time, assume it's ready
                     if (attempt >= maxAttempts) {
                         console.log(`⏰ Max wait time reached (${maxWaitTime}ms), assuming PDF is ready`);
                         this.onPDFLoaded('iframe', transferMethod);
                         return;
                     }
                     
-                    // Continue checking
+                    // Continue checking with progress indicator
+                    if (attempt % 5 === 0) { // Log every 1 second
+                        console.log(`⏳ Still waiting for PDF to render... (${actualWaitTime}ms elapsed)`);
+                    }
+                    
                     setTimeout(() => {
                         this.waitForPDFToRender(iframe, transferMethod, attempt + 1, maxAttempts);
                     }, checkInterval);
                     
                 } catch (error) {
                     console.warn(`Error checking PDF render status: ${error.message}`);
-                    // Fall back to timing assumption
-                    if (attempt >= 5) { // At least 750ms
-                        console.log(`⏰ Falling back to timing assumption after error`);
+                    // Fall back to longer timing assumption
+                    if (attempt >= 8) { // At least 1.6 seconds
+                        console.log(`⏰ Falling back to timing assumption after error (waited ${attempt * checkInterval}ms)`);
                         this.onPDFLoaded('iframe', transferMethod);
                     } else {
                         setTimeout(() => {
@@ -1818,6 +2212,50 @@ webView.CoreWebView2.SetVirtualHostNameToFolderMapping(
                         }, checkInterval);
                     }
                 }
+            }
+
+            debugCustomStreamHandler() {
+                // Debug method to test custom stream handler availability
+                console.log('🔧 Debug: Testing Custom Stream Handler...');
+                
+                // Check if UWP has indicated custom stream availability
+                if (typeof window.customStreamHandlerAvailable !== 'undefined') {
+                    if (window.customStreamHandlerAvailable === false) {
+                        console.log('❌ UWP has indicated custom stream handler is NOT available');
+                        console.log('Reason: WebView2 runtime does not support custom scheme registration');
+                        return;
+                    } else if (window.customStreamHandlerAvailable === true) {
+                        console.log('✅ UWP has indicated custom stream handler IS available');
+                    }
+                }
+                
+                // Try to fetch a test URL to see what happens
+                const testUrl = 'uwp-pdf://test-debug';
+                console.log(`🧪 Testing fetch to: ${testUrl}`);
+                
+                fetch(testUrl)
+                    .then(response => {
+                        console.log(`✅ Custom stream handler responded:`, response);
+                        console.log(`Status: ${response.status} ${response.statusText}`);
+                        return response.text();
+                    })
+                    .then(text => {
+                        console.log(`Response body: ${text}`);
+                    })
+                    .catch(error => {
+                        console.error(`❌ Custom stream handler error:`, error);
+                        
+                        // Check for specific error types
+                        if (error.message.includes('scheme does not have a registered handler') || 
+                            error.message.includes('URL scheme') || 
+                            error.message.includes('not supported')) {
+                            console.log(`💡 This error indicates the custom stream handler is not properly registered in UWP`);
+                            console.log(`💡 Likely cause: WebView2 runtime version does not support custom scheme registration`);
+                            console.log(`💡 Solution: Update WebView2 runtime or use alternative PDF loading methods`);
+                        } else {
+                            console.log(`💡 This indicates the custom stream handler is not properly registered in UWP`);
+                        }
+                    });
             }
         }
 

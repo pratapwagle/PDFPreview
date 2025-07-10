@@ -38,7 +38,8 @@
         Description="UWP application with WebView2"
         BackgroundColor="transparent">
         <uap:DefaultTile Wide310x150Logo="Assets\Wide310x150Logo.scale-200.png"/>
-        <uap:SplashScreen Image="Assets\SplashScreen.scale-200.png" />
+        <!-- Splash screen is optional - remove or comment out if not needed -->
+        <!-- <uap:SplashScreen Image="Assets\SplashScreen.scale-200.png" /> -->
       </uap:VisualElements>
     </Application>
   </Applications>

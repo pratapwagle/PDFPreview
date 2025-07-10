@@ -3,15 +3,23 @@
   "WorkspaceRootPath": "C:\\Users\\waglep\\Repo\\Personal\\PDFPreview\\UWP\\",
   "Documents": [
     {
-      "AbsoluteMoniker": "D:0:0:{12345678-1234-1234-1234-123456789012}|PDFPreviewUWP.csproj|c:\\users\\waglep\\repo\\personal\\pdfpreview\\uwp\\pdfpreviewmanager.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
+      "AbsoluteMoniker": "D:0:0:{12345678-1234-1234-1234-123456789012}|PDFPreviewUWP.csproj|C:\\Users\\waglep\\Repo\\Personal\\PDFPreview\\UWP\\pdfpreviewmanager.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
       "RelativeMoniker": "D:0:0:{12345678-1234-1234-1234-123456789012}|PDFPreviewUWP.csproj|solutionrelative:pdfpreviewmanager.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
     },
     {
-      "AbsoluteMoniker": "D:0:0:{12345678-1234-1234-1234-123456789012}|PDFPreviewUWP.csproj|c:\\users\\waglep\\repo\\personal\\pdfpreview\\uwp\\mainpage.xaml.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
+      "AbsoluteMoniker": "D:0:0:{12345678-1234-1234-1234-123456789012}|PDFPreviewUWP.csproj|C:\\Users\\waglep\\Repo\\Personal\\PDFPreview\\UWP\\mainpage.xaml.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
       "RelativeMoniker": "D:0:0:{12345678-1234-1234-1234-123456789012}|PDFPreviewUWP.csproj|solutionrelative:mainpage.xaml.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
     },
     {
-      "AbsoluteMoniker": "D:0:0:{12345678-1234-1234-1234-123456789012}|PDFPreviewUWP.csproj|c:\\users\\waglep\\repo\\personal\\pdfpreview\\uwp\\mainpage.xaml||{F11ACC28-31D1-4C80-A34B-F4E09D3D753C}",
+      "AbsoluteMoniker": "D:0:0:{12345678-1234-1234-1234-123456789012}|PDFPreviewUWP.csproj|c:\\users\\waglep\\repo\\personal\\pdfpreview\\uwp\\package.appxmanifest||{4D47164B-07B6-4A52-A855-728D6A2E2AA3}|Code",
+      "RelativeMoniker": "D:0:0:{12345678-1234-1234-1234-123456789012}|PDFPreviewUWP.csproj|solutionrelative:package.appxmanifest||{4D47164B-07B6-4A52-A855-728D6A2E2AA3}|Code"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{12345678-1234-1234-1234-123456789012}|PDFPreviewUWP.csproj|C:\\Users\\waglep\\Repo\\Personal\\PDFPreview\\UWP\\appconfig.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
+      "RelativeMoniker": "D:0:0:{12345678-1234-1234-1234-123456789012}|PDFPreviewUWP.csproj|solutionrelative:appconfig.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{12345678-1234-1234-1234-123456789012}|PDFPreviewUWP.csproj|C:\\Users\\waglep\\Repo\\Personal\\PDFPreview\\UWP\\mainpage.xaml||{F11ACC28-31D1-4C80-A34B-F4E09D3D753C}",
       "RelativeMoniker": "D:0:0:{12345678-1234-1234-1234-123456789012}|PDFPreviewUWP.csproj|solutionrelative:mainpage.xaml||{F11ACC28-31D1-4C80-A34B-F4E09D3D753C}"
     }
   ],
@@ -22,7 +30,7 @@
       "DocumentGroups": [
         {
           "DockedWidth": 200,
-          "SelectedChildIndex": 3,
+          "SelectedChildIndex": 6,
           "Children": [
             {
               "$type": "Bookmark",
@@ -38,27 +46,15 @@
             },
             {
               "$type": "Document",
-              "DocumentIndex": 0,
-              "Title": "PDFPreviewManager.cs",
-              "DocumentMoniker": "C:\\Users\\waglep\\Repo\\Personal\\PDFPreview\\UWP\\PDFPreviewManager.cs",
-              "RelativeDocumentMoniker": "PDFPreviewManager.cs",
-              "ToolTip": "C:\\Users\\waglep\\Repo\\Personal\\PDFPreview\\UWP\\PDFPreviewManager.cs",
-              "RelativeToolTip": "PDFPreviewManager.cs",
-              "ViewState": "AgIAAOEFAAAAAAAAAAAuwOsFAABHAAAAAAAAAA==",
-              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
-              "WhenOpened": "2025-07-10T11:48:17.905Z",
-              "EditorCaption": ""
-            },
-            {
-              "$type": "Document",
               "DocumentIndex": 2,
-              "Title": "MainPage.xaml",
-              "DocumentMoniker": "C:\\Users\\waglep\\Repo\\Personal\\PDFPreview\\UWP\\MainPage.xaml",
-              "RelativeDocumentMoniker": "MainPage.xaml",
-              "ToolTip": "C:\\Users\\waglep\\Repo\\Personal\\PDFPreview\\UWP\\MainPage.xaml",
-              "RelativeToolTip": "MainPage.xaml",
-              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.003549|",
-              "WhenOpened": "2025-07-10T13:15:25.21Z",
+              "Title": "Package.appxmanifest",
+              "DocumentMoniker": "C:\\Users\\waglep\\Repo\\Personal\\PDFPreview\\UWP\\Package.appxmanifest",
+              "RelativeDocumentMoniker": "Package.appxmanifest",
+              "ToolTip": "C:\\Users\\waglep\\Repo\\Personal\\PDFPreview\\UWP\\Package.appxmanifest",
+              "RelativeToolTip": "Package.appxmanifest",
+              "ViewState": "AgIAAAAAAAAAAAAAAAAAAA0AAAAAAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.001793|",
+              "WhenOpened": "2025-07-10T18:59:14.391Z",
               "EditorCaption": ""
             },
             {
@@ -69,10 +65,46 @@
               "RelativeDocumentMoniker": "MainPage.xaml.cs",
               "ToolTip": "C:\\Users\\waglep\\Repo\\Personal\\PDFPreview\\UWP\\MainPage.xaml.cs",
               "RelativeToolTip": "MainPage.xaml.cs",
-              "ViewState": "AgIAANwAAAAAAAAAAAAAwOsAAAAUAAAAAAAAAA==",
+              "ViewState": "AgIAAD4AAAAAAAAAAAAhwEkAAAAQAAAAAAAAAA==",
               "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
               "WhenOpened": "2025-07-10T12:10:07.947Z",
               "EditorCaption": ""
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 3,
+              "Title": "AppConfig.cs",
+              "DocumentMoniker": "C:\\Users\\waglep\\Repo\\Personal\\PDFPreview\\UWP\\AppConfig.cs",
+              "RelativeDocumentMoniker": "AppConfig.cs",
+              "ToolTip": "C:\\Users\\waglep\\Repo\\Personal\\PDFPreview\\UWP\\AppConfig.cs",
+              "RelativeToolTip": "AppConfig.cs",
+              "ViewState": "AgIAACsAAAAAAAAAAIA3wDwAAAAeAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
+              "WhenOpened": "2025-07-10T16:13:08.061Z"
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 0,
+              "Title": "PDFPreviewManager.cs",
+              "DocumentMoniker": "C:\\Users\\waglep\\Repo\\Personal\\PDFPreview\\UWP\\PDFPreviewManager.cs",
+              "RelativeDocumentMoniker": "PDFPreviewManager.cs",
+              "ToolTip": "C:\\Users\\waglep\\Repo\\Personal\\PDFPreview\\UWP\\PDFPreviewManager.cs",
+              "RelativeToolTip": "PDFPreviewManager.cs",
+              "ViewState": "AgIAAM4FAAAAAAAAAAAqwNwFAAA1AAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
+              "WhenOpened": "2025-07-10T11:48:17.905Z",
+              "EditorCaption": ""
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 4,
+              "Title": "MainPage.xaml",
+              "DocumentMoniker": "C:\\Users\\waglep\\Repo\\Personal\\PDFPreview\\UWP\\MainPage.xaml",
+              "RelativeDocumentMoniker": "MainPage.xaml",
+              "ToolTip": "C:\\Users\\waglep\\Repo\\Personal\\PDFPreview\\UWP\\MainPage.xaml",
+              "RelativeToolTip": "MainPage.xaml",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.003549|",
+              "WhenOpened": "2025-07-10T13:15:25.21Z"
             }
           ]
         },
