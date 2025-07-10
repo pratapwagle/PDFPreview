@@ -1271,18 +1271,6 @@ Requirements:
                 {
                     await webView.CoreWebView2.ExecuteScriptAsync("window.virtualHostReady = true;");
                     Debug.WriteLine("✅ Virtual host readiness flag set for MFE");
-                    
-                    // Also create a test file that the MFE can check for readiness verification
-                    try
-                    {
-                        var testFile = await ApplicationData.Current.LocalFolder.CreateFileAsync("virtualhost_verify.txt", CreationCollisionOption.ReplaceExisting);
-                        await FileIO.WriteTextAsync(testFile, "Virtual host mapping is active and ready");
-                        Debug.WriteLine("✅ Virtual host verification file created");
-                    }
-                    catch (Exception testEx)
-                    {
-                        Debug.WriteLine($"⚠️ Could not create verification file: {testEx.Message}");
-                    }
                 }
                 catch (Exception flagEx)
                 {
@@ -1407,64 +1395,29 @@ Requirements:
                 string testScript = $@"
                     (async function() {{
                         try {{
-                            console.log('🧪 Testing virtual host URL: {testUrl}');
-                            
-                            // First, test if the virtual host domain resolves
-                            const startTime = performance.now();
-                            const response = await fetch('{testUrl}', {{
-                                method: 'GET',
-                                cache: 'no-cache',
-                                headers: {{
-                                    'Accept': 'text/plain,*/*'
-                                }}
-                            }});
-                            const fetchTime = performance.now() - startTime;
-                            
-                            console.log('📊 Fetch completed in', fetchTime.toFixed(2), 'ms');
-                            console.log('📊 Response status:', response.status, response.statusText);
-                            console.log('📊 Response headers:', [...response.headers.entries()]);
+                            console.log('Testing virtual host URL: {testUrl}');
+                            const response = await fetch('{testUrl}');
+                            console.log('Fetch response status:', response.status, response.statusText);
                             
                             if (response.ok) {{
                                 const content = await response.text();
-                                console.log('📄 Retrieved content length:', content.length, 'chars');
-                                console.log('📄 Content preview:', content.substring(0, 100));
-                                console.log('📄 Expected content contains:', '{testContent}');
+                                console.log('Retrieved content:', content);
+                                console.log('Expected content:', '{testContent}');
                                 
                                 if (content.includes('Virtual host test file content')) {{
-                                    console.log('✅ Virtual host test SUCCESS - content matches expected pattern');
+                                    console.log('✅ Virtual host test SUCCESS - content matches');
                                     return 'VIRTUAL_HOST_SUCCESS';
                                 }} else {{
                                     console.log('❌ Virtual host test FAILED - content mismatch');
-                                    console.log('Expected substring: Virtual host test file content');
-                                    console.log('Actual content:', JSON.stringify(content));
                                     return 'VIRTUAL_HOST_CONTENT_MISMATCH';
                                 }}
                             }} else {{
-                                console.log('❌ Virtual host test FAILED - HTTP error:', response.status, response.statusText);
-                                
-                                // Try to get more error details
-                                try {{
-                                    const errorText = await response.text();
-                                    console.log('❌ Error response body:', errorText);
-                                }} catch (e) {{
-                                    console.log('❌ Could not read error response body');
-                                }}
-                                
+                                console.log('❌ Virtual host test FAILED - HTTP error:', response.status);
                                 return 'VIRTUAL_HOST_HTTP_ERROR_' + response.status;
                             }}
                         }} catch (error) {{
-                            console.log('❌ Virtual host test FAILED - Exception:', error.name, error.message);
-                            console.log('❌ Error stack:', error.stack);
-                            
-                            // Check for specific error types
-                            if (error.name === 'TypeError' && error.message.includes('Failed to fetch')) {{
-                                console.log('💡 This usually indicates virtual host mapping is not set up or accessible');
-                            }}
-                            if (error.name === 'NetworkError' || error.message.includes('ERR_NAME_NOT_RESOLVED')) {{
-                                console.log('💡 DNS resolution failed - virtual host mapping may not be configured');
-                            }}
-                            
-                            return 'VIRTUAL_HOST_EXCEPTION: ' + error.name + ' - ' + error.message;
+                            console.log('❌ Virtual host test FAILED - Exception:', error.message);
+                            return 'VIRTUAL_HOST_EXCEPTION: ' + error.message;
                         }}
                     }})();
                 ";
