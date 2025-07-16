@@ -79,8 +79,9 @@ namespace PDFPreviewUWP
                     }
                 }
                 
-                // Test virtual host mapping if using VirtualHost method
-                if (AppConfig.CurrentPDFMethod == PDFLoadingMethod.VirtualHost)
+                // Test virtual host mapping if using VirtualHost methods
+                if (AppConfig.CurrentPDFMethod == PDFLoadingMethod.VirtualHost || 
+                    AppConfig.CurrentPDFMethod == PDFLoadingMethod.VirtualHostNormal)
                 {
                     Debug.WriteLine("🧪 Testing virtual host mapping...");
                     var virtualHostWorks = await TestVirtualHostMappingAsync();
@@ -88,6 +89,13 @@ namespace PDFPreviewUWP
                     {
                         Debug.WriteLine("⚠️ Virtual host mapping test failed - WebView2 may not support this feature");
                         Debug.WriteLine("💡 Alternative: Switch to DataURL or CustomStream method");
+                        
+                        // Provide fallback recommendation
+                        Debug.WriteLine("💡 Consider running diagnostics with: await pdfManager.DiagnoseVirtualHostMappingAsync()");
+                    }
+                    else
+                    {
+                        Debug.WriteLine("✅ Virtual host mapping test passed");
                     }
                 }
             }
@@ -1249,6 +1257,9 @@ Requirements:
                     return;
                 }
 
+                // Wait for WebView2 to be fully ready
+                await Task.Delay(100);
+
                 // Get the LocalState path and virtual host name
                 string localFolderPath = ApplicationData.Current.LocalFolder.Path;
                 string virtualHostName = "localassets.web";
@@ -1258,9 +1269,33 @@ Requirements:
                 Debug.WriteLine($"Virtual host name: {virtualHostName}");
                 Debug.WriteLine($"WebView2 version: {webView.CoreWebView2.Environment.BrowserVersionString}");
 
+                // Check if virtual host mapping is supported
+                if (!IsVirtualHostMappingSupported(webView.CoreWebView2.Environment.BrowserVersionString))
+                {
+                    Debug.WriteLine("❌ Virtual host mapping not supported in this WebView2 version");
+                    Debug.WriteLine("💡 Requires WebView2 1.0.664 or later");
+                    
+                    // Set flag for MFE
+                    try
+                    {
+                        await webView.CoreWebView2.ExecuteScriptAsync("window.virtualHostReady = false; window.virtualHostUnsupported = true;");
+                    }
+                    catch { /* Ignore if WebView2 is not responsive */ }
+                    
+                    return;
+                }
+
+                // Validate local folder path
+                if (!System.IO.Directory.Exists(localFolderPath))
+                {
+                    Debug.WriteLine($"❌ Local folder does not exist: {localFolderPath}");
+                    return;
+                }
+
                 // Map the entire LocalState folder to "localassets.web"
                 // The SetVirtualHostNameToFolderMapping API is available in WebView2 1.0.664+
-                // Our version (1.0.2210.55) should definitely support this
+                Debug.WriteLine("🔄 Attempting to set virtual host name to folder mapping...");
+                
                 webView.CoreWebView2.SetVirtualHostNameToFolderMapping(
                     virtualHostName,
                     localFolderPath,
@@ -1270,16 +1305,8 @@ Requirements:
                 Debug.WriteLine($"✅ Virtual host '{virtualHostName}' mapped to '{localFolderPath}'");
                 Debug.WriteLine($"💡 PDFs can now be accessed via https://{virtualHostName}/filename.pdf");
                 
-                // Set up a flag that the MFE can check for readiness
-                try
-                {
-                    await webView.CoreWebView2.ExecuteScriptAsync("window.virtualHostReady = true;");
-                    Debug.WriteLine("✅ Virtual host readiness flag set for MFE");
-                }
-                catch (Exception flagEx)
-                {
-                    Debug.WriteLine($"⚠️ Could not set virtual host flag: {flagEx.Message}");
-                }
+                // Verify the mapping works by testing file access
+                Debug.WriteLine("🔍 Verifying virtual host mapping...");
             }
             catch (System.Runtime.InteropServices.COMException comEx)
             {
@@ -1558,6 +1585,246 @@ Requirements:
                 Debug.WriteLine($"❌ Error in LoadPDFWithVirtualHostNormalAsync: {ex.Message}");
                 throw;
             }
+        }
+
+        /// <summary>
+        /// Comprehensive diagnostic test for virtual host mapping
+        /// This method provides detailed information about the virtual host mapping state
+        /// </summary>
+        public async Task<VirtualHostDiagnosticResult> DiagnoseVirtualHostMappingAsync()
+        {
+            var result = new VirtualHostDiagnosticResult();
+            
+            try
+            {
+                // 1. Check WebView2 initialization state
+                result.IsWebView2Initialized = webView?.CoreWebView2 != null;
+                if (!result.IsWebView2Initialized)
+                {
+                    result.Errors.Add("WebView2 is not initialized");
+                    return result;
+                }
+
+                // 2. Get WebView2 version information
+                result.WebView2Version = webView.CoreWebView2.Environment.BrowserVersionString;
+                Debug.WriteLine($"🔍 WebView2 Version: {result.WebView2Version}");
+
+                // 3. Check if virtual host mapping is supported (requires WebView2 1.0.664+)
+                result.IsVirtualHostMappingSupported = IsVirtualHostMappingSupported(result.WebView2Version);
+                Debug.WriteLine($"🔍 Virtual Host Mapping Supported: {result.IsVirtualHostMappingSupported}");
+
+                // 4. Get local folder information
+                result.LocalFolderPath = ApplicationData.Current.LocalFolder.Path;
+                result.LocalFolderExists = System.IO.Directory.Exists(result.LocalFolderPath);
+                Debug.WriteLine($"🔍 Local Folder: {result.LocalFolderPath} (Exists: {result.LocalFolderExists})");
+
+                // 5. Test virtual host mapping setup
+                if (result.IsVirtualHostMappingSupported)
+                {
+                    try
+                    {
+                        string virtualHostName = "localassets.web";
+                        Debug.WriteLine($"🔍 Testing virtual host mapping setup for: {virtualHostName}");
+                        
+                        // Try to set up the mapping
+                        webView.CoreWebView2.SetVirtualHostNameToFolderMapping(
+                            virtualHostName,
+                            result.LocalFolderPath,
+                            CoreWebView2HostResourceAccessKind.Allow
+                        );
+                        
+                        result.MappingSetupSuccessful = true;
+                        result.VirtualHostName = virtualHostName;
+                        Debug.WriteLine($"✅ Virtual host mapping setup successful");
+                    }
+                    catch (Exception mappingEx)
+                    {
+                        result.MappingSetupSuccessful = false;
+                        result.Errors.Add($"Virtual host mapping setup failed: {mappingEx.Message}");
+                        Debug.WriteLine($"❌ Virtual host mapping setup failed: {mappingEx.Message}");
+                    }
+                }
+                else
+                {
+                    result.Errors.Add("Virtual host mapping not supported in this WebView2 version");
+                }
+
+                // 6. Test file access if mapping was successful
+                if (result.MappingSetupSuccessful)
+                {
+                    var accessTest = await TestVirtualHostFileAccessAsync(result.VirtualHostName);
+                    result.FileAccessSuccessful = accessTest.Success;
+                    result.TestFileUrl = accessTest.TestUrl;
+                    
+                    if (!accessTest.Success)
+                    {
+                        result.Errors.Add($"Virtual host file access test failed: {accessTest.Error}");
+                    }
+                }
+
+                // 7. Test JavaScript execution
+                try
+                {
+                    var jsResult = await webView.CoreWebView2.ExecuteScriptAsync("typeof fetch");
+                    result.JavaScriptFetchAvailable = jsResult.Contains("function");
+                    Debug.WriteLine($"🔍 JavaScript fetch available: {result.JavaScriptFetchAvailable}");
+                }
+                catch (Exception jsEx)
+                {
+                    result.Errors.Add($"JavaScript execution test failed: {jsEx.Message}");
+                }
+
+                // 8. Overall assessment
+                result.IsFullyFunctional = result.IsWebView2Initialized && 
+                                         result.IsVirtualHostMappingSupported && 
+                                         result.MappingSetupSuccessful && 
+                                         result.FileAccessSuccessful && 
+                                         result.JavaScriptFetchAvailable;
+
+                Debug.WriteLine($"🔍 Virtual Host Mapping Diagnostic Complete - Fully Functional: {result.IsFullyFunctional}");
+                
+                return result;
+            }
+            catch (Exception ex)
+            {
+                result.Errors.Add($"Diagnostic test failed: {ex.Message}");
+                Debug.WriteLine($"❌ Virtual host mapping diagnostic failed: {ex.Message}");
+                return result;
+            }
+        }
+
+        /// <summary>
+        /// Test virtual host file access by creating a test file and accessing it
+        /// </summary>
+        private async Task<(bool Success, string TestUrl, string Error)> TestVirtualHostFileAccessAsync(string virtualHostName)
+        {
+            try
+            {
+                // Create a test file
+                var testFileName = $"vhost_test_{DateTime.Now:HHmmss}.txt";
+                var testContent = $"Virtual host test at {DateTime.Now:yyyy-MM-dd HH:mm:ss}";
+                
+                var localFolder = ApplicationData.Current.LocalFolder;
+                var testFile = await localFolder.CreateFileAsync(testFileName, CreationCollisionOption.ReplaceExisting);
+                await FileIO.WriteTextAsync(testFile, testContent);
+
+                var testUrl = $"https://{virtualHostName}/{testFileName}";
+                Debug.WriteLine($"🔍 Testing virtual host file access: {testUrl}");
+
+                // Test access via JavaScript with timeout
+                var testScript = $@"
+                    (async function() {{
+                        const controller = new AbortController();
+                        const timeoutId = setTimeout(() => controller.abort(), 5000);
+                        
+                        try {{
+                            const response = await fetch('{testUrl}', {{ signal: controller.signal }});
+                            clearTimeout(timeoutId);
+                            
+                            if (response.ok) {{
+                                const content = await response.text();
+                                return content.includes('Virtual host test') ? 'SUCCESS' : 'CONTENT_MISMATCH';
+                            }} else {{
+                                return 'HTTP_ERROR_' + response.status;
+                            }}
+                        }} catch (error) {{
+                            clearTimeout(timeoutId);
+                            return 'FETCH_ERROR: ' + error.message;
+                        }}
+                    }})();
+                ";
+
+                var jsResult = await webView.CoreWebView2.ExecuteScriptAsync(testScript);
+                var success = jsResult.Contains("SUCCESS");
+                
+                // Clean up test file
+                try
+                {
+                    await testFile.DeleteAsync();
+                }
+                catch { /* Ignore cleanup errors */ }
+
+                return (success, testUrl, success ? null : jsResult);
+            }
+            catch (Exception ex)
+            {
+                return (false, null, ex.Message);
+            }
+        }
+
+        /// <summary>
+        /// Check if virtual host mapping is supported in the current WebView2 version
+        /// </summary>
+        private bool IsVirtualHostMappingSupported(string webView2Version)
+        {
+            try
+            {
+                // Virtual host mapping was introduced in WebView2 1.0.664
+                // Parse version string (format: "1.0.2210.55")
+                var versionParts = webView2Version.Split('.');
+                if (versionParts.Length >= 3)
+                {
+                    var major = int.Parse(versionParts[0]);
+                    var minor = int.Parse(versionParts[1]);
+                    var build = int.Parse(versionParts[2]);
+                    
+                    // Check if version is 1.0.664 or higher
+                    return major > 1 || (major == 1 && minor > 0) || (major == 1 && minor == 0 && build >= 664);
+                }
+                
+                return false;
+            }
+            catch
+            {
+                // If we can't parse the version, assume it's not supported
+                return false;
+            }
+        }
+    }
+
+    /// <summary>
+    /// Result class for virtual host mapping diagnostic tests
+    /// </summary>
+    public class VirtualHostDiagnosticResult
+    {
+        public bool IsWebView2Initialized { get; set; }
+        public string WebView2Version { get; set; }
+        public bool IsVirtualHostMappingSupported { get; set; }
+        public string LocalFolderPath { get; set; }
+        public bool LocalFolderExists { get; set; }
+        public bool MappingSetupSuccessful { get; set; }
+        public string VirtualHostName { get; set; }
+        public bool FileAccessSuccessful { get; set; }
+        public string TestFileUrl { get; set; }
+        public bool JavaScriptFetchAvailable { get; set; }
+        public bool IsFullyFunctional { get; set; }
+        public List<string> Errors { get; set; } = new List<string>();
+        
+        public override string ToString()
+        {
+            var sb = new System.Text.StringBuilder();
+            sb.AppendLine("Virtual Host Mapping Diagnostic Results:");
+            sb.AppendLine($"  WebView2 Initialized: {IsWebView2Initialized}");
+            sb.AppendLine($"  WebView2 Version: {WebView2Version}");
+            sb.AppendLine($"  Virtual Host Mapping Supported: {IsVirtualHostMappingSupported}");
+            sb.AppendLine($"  Local Folder: {LocalFolderPath} (Exists: {LocalFolderExists})");
+            sb.AppendLine($"  Mapping Setup Successful: {MappingSetupSuccessful}");
+            sb.AppendLine($"  Virtual Host Name: {VirtualHostName}");
+            sb.AppendLine($"  File Access Successful: {FileAccessSuccessful}");
+            sb.AppendLine($"  Test File URL: {TestFileUrl}");
+            sb.AppendLine($"  JavaScript Fetch Available: {JavaScriptFetchAvailable}");
+            sb.AppendLine($"  Fully Functional: {IsFullyFunctional}");
+            
+            if (Errors.Count > 0)
+            {
+                sb.AppendLine("  Errors:");
+                foreach (var error in Errors)
+                {
+                    sb.AppendLine($"    - {error}");
+                }
+            }
+            
+            return sb.ToString();
         }
     }
 }

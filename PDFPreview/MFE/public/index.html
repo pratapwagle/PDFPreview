@@ -762,15 +762,7 @@
             async loadVirtualHostPDF(virtualUrl, transferMethod = 'VirtualHost') {
                 console.log(`Loading PDF from virtual host: ${virtualUrl} (Method: ${transferMethod})`);
                 
-                // First, check if virtual host mapping is ready
-                const hostReady = await this.checkVirtualHostReadiness();
-                if (!hostReady.ready) {
-                    console.error('Virtual host mapping not ready:', hostReady.reason);
-                    this.showVirtualHostErrorMessage(virtualUrl, hostReady.reason);
-                    this.onPDFError('virtual-host-check', transferMethod);
-                    return;
-                }
-                
+                         
                 // Check if this is lazy loading or normal loading based on transfer method
                 const isLazyLoading = transferMethod.includes('Lazy') || transferMethod.includes('lazy');
                 
@@ -2099,6 +2091,14 @@ webView.CoreWebView2.SetVirtualHostNameToFolderMapping(
                         console.log('⚠️ Virtual host readiness flag set to false');
                         return { ready: false, reason: 'Virtual host mapping not ready yet' };
                     }
+                }
+                
+                // If no flags are set, check if we're in development mode
+                const isDevelopment = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+                
+                if (isDevelopment) {
+                    console.log('🧪 Development mode detected - skipping virtual host test');
+                    return { ready: false, reason: 'Development mode - virtual host not needed' };
                 }
                 
                 // If no flags are set, perform a manual test
